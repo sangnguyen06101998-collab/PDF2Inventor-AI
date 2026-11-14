@@ -1,0 +1,123 @@
+import unittest
+
+from pdf_ai import (
+    PdfAIError,
+    analysis_schema,
+    build_command_document,
+    format_analysis_report,
+    _extract_output_text,
+)
+
+
+class PdfAiSchemaTests(unittest.TestCase):
+    def test_schema_requires_analysis_and_cad_fields(self):
+        schema = analysis_schema()
+        self.assertIn("cad_command", schema["required"])
+        self.assertIn("dimensions_detected", schema["required"])
+        self.assertFalse(schema["additionalProperties"])
+
+    def test_rectangle_command_is_wrapped_for_current_project(self):
+        analysis = {
+            "cad_command": {
+                "op": "create_rectangle_extrude",
+                "component_id": "WRONG_ID_FROM_MODEL",
+                "length": 120,
+                "width": 80,
+                "thickness": 6,
+                "origin_x": 0,
+                "origin_y": 0,
+                "diameter": None,
+                "center_x": None,
+                "center_y": None,
+                "unit": "mm",
+                "operation": "new_body",
+                "direction": "positive",
+                "reason": "Plate part",
+            },
+            "questions": [],
+            "warnings": ["Check the drawing before applying."],
+        }
+        result = build_command_document(analysis, "PROJECT_X", "PART_X")
+        self.assertEqual(result["project_id"], "PROJECT_X")
+        self.assertEqual(result["commands"][0]["component_id"], "PART_X")
+        self.assertEqual(result["commands"][0]["length"], 120)
+        self.assertEqual(result["commands"][0]["unit"], "mm")
+        self.assertEqual(result["warnings"], ["Check the drawing before applying."])
+
+    def test_rejects_cad_command_with_missing_dimension(self):
+        analysis = {
+            "cad_command": {
+                "op": "create_rectangle_extrude",
+                "length": None,
+                "width": 80,
+                "thickness": 6,
+                "unit": "mm",
+            }
+        }
+        with self.assertRaises(PdfAIError):
+            build_command_document(analysis, "PROJECT_X", "PART_X")
+
+    def test_no_command_does_not_create_empty_geometry(self):
+        with self.assertRaises(PdfAIError):
+            build_command_document(
+                {"cad_command": None, "questions": ["What is the thickness?"]},
+                "PROJECT_X",
+                "PART_X",
+            )
+
+    def test_extracts_responses_output_text(self):
+        response = {"output_text": '{"ok":true}'}
+        self.assertEqual(_extract_output_text(response), '{"ok":true}')
+
+    def test_extracts_message_content_fallback(self):
+        response = {
+            "output": [{
+                "content": [{"type": "output_text", "text": '{"ok":true}'}]
+            }]
+        }
+        self.assertEqual(_extract_output_text(response), '{"ok":true}')
+
+    def test_refusal_is_reported(self):
+        response = {
+            "output": [{
+                "content": [{"type": "refusal", "refusal": "cannot process"}]
+            }]
+        }
+        with self.assertRaises(PdfAIError):
+            _extract_output_text(response)
+
+
+class PdfAiReportTests(unittest.TestCase):
+    def test_report_contains_dimensions_and_questions(self):
+        report = format_analysis_report({
+            "drawing_title": "Bracket",
+            "part_name": "Bracket",
+            "drawing_type": "single_part",
+            "units": "mm",
+            "overall_length_mm": 100,
+            "overall_width_mm": 50,
+            "overall_height_mm": 8,
+            "confidence": "high",
+            "views_detected": ["Front view", "Side view"],
+            "dimensions_detected": [{
+                "label": "Length",
+                "value": 100,
+                "unit": "mm",
+                "view": "Front",
+                "evidence": "Dimension line marked 100",
+                "confidence": "high",
+            }],
+            "feature_summary": ["Flat rectangular plate"],
+            "manufacturing_notes": [],
+            "questions": ["Confirm hole diameter."],
+            "warnings": [],
+            "cad_command": None,
+        })
+        self.assertIn("Bracket", report)
+        self.assertIn("100 mm", report)
+        self.assertIn("Confirm hole diameter", report)
+        self.assertIn("Chưa tạo lệnh", report)
+
+
+if __name__ == "__main__":
+    unittest.main()
