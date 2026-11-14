@@ -573,7 +573,7 @@ def analyze_pdf(
     part_name: str,
     document_path: str,
 ) -> dict[str, Any]:
-    """Send one PDF to the Responses API and return validated drawing analysis."""
+    """Inspect PDF text/images and native vectors, then validate proposed CAD geometry."""
     path = Path(pdf_path)
     if not path.is_file() or path.suffix.lower() != ".pdf":
         raise PdfAIError("Hãy chọn một file PDF bản vẽ hợp lệ.")
@@ -589,13 +589,20 @@ def analyze_pdf(
 
     try:
         encoded_pdf = base64.b64encode(path.read_bytes()).decode("ascii")
+        vector_report = extract_pdf_vector_report(str(path))
     except OSError as exc:
         raise PdfAIError(f"Không đọc được PDF: {exc}") from exc
+    except Exception as exc:
+        raise PdfAIError(f"Không phân tích được đường nét vector PDF: {exc}") from exc
 
+    vector_context = compact_vector_context(vector_report)
+    analysis_prompt = _analysis_prompt(
+        project_id, component_id, part_name, document_path, vector_context
+    )
     payload = {
         "model": model.strip() or DEFAULT_MODEL,
         "store": False,
-        "max_output_tokens": 8000,
+        "max_output_tokens": 12000,
         "input": [
             {
                 "role": "user",
@@ -608,7 +615,7 @@ def analyze_pdf(
                     },
                     {
                         "type": "input_text",
-                        "text": _analysis_prompt(project_id, component_id, part_name, document_path),
+                        "text": analysis_prompt,
                     },
                 ],
             }
@@ -633,7 +640,7 @@ def analyze_pdf(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=240) as response:
+        with urllib.request.urlopen(request, timeout=300) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
         try:
@@ -656,28 +663,82 @@ def analyze_pdf(
         response_data = json.loads(raw.decode("utf-8"))
     except Exception as exc:
         raise PdfAIError("OpenAI API trả dữ liệu không phải JSON hợp lệ.") from exc
-    text = _extract_output_text(response_data)
+    output_text = _extract_output_text(response_data)
     try:
-        result = json.loads(text)
+        result = json.loads(output_text)
     except json.JSONDecodeError as exc:
         raise PdfAIError(f"Không đọc được JSON phân tích do AI trả về: {exc}") from exc
 
     if not isinstance(result, dict):
         raise PdfAIError("Dữ liệu phân tích AI không phải một đối tượng JSON.")
+
     result.setdefault("questions", [])
     result.setdefault("warnings", [])
     result.setdefault("cad_command", None)
+    result.setdefault("dimensions_detected", [])
+    result["vector_summary"] = {
+        "native_vector_pdf": vector_report.get("native_vector_pdf", False),
+        "page_count": vector_report.get("page_count", 0),
+        "total_path_count": vector_report.get("total_path_count", 0),
+        "total_vector_segment_count": vector_report.get("total_vector_segment_count", 0),
+        "total_text_span_count": vector_report.get("total_text_span_count", 0),
+        "total_embedded_image_count": vector_report.get("total_embedded_image_count", 0),
+        "vector_details_truncated": vector_report.get("vector_details_truncated", False),
+    }
+
     command = result.get("cad_command")
     if command is not None:
         if not isinstance(command, dict):
             raise PdfAIError("cad_command không đúng cấu trúc.")
-        allowed_ops = {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"}
+        allowed_ops = {
+            "create_rectangle_extrude",
+            "create_circle_extrude",
+            "create_profile_extrude",
+        }
         if command.get("op") not in allowed_ops:
             raise PdfAIError("AI trả về loại feature chưa được hỗ trợ.")
         command["component_id"] = component_id
         command["unit"] = "mm"
-    return result
 
+        scale_verification = verify_scale_references(vector_report, result)
+        result["scale_verification"] = scale_verification
+        geometry_issues = []
+        if result.get("scale_status") != "verified" or not scale_verification.get("verified"):
+            geometry_issues.append(
+                "Chưa xác minh được tỷ lệ hình học vector: " + str(scale_verification.get("reason"))
+            )
+        if result.get("confidence") != "high":
+            geometry_issues.append("Độ tin cậy phân tích tổng thể chưa đạt mức cao.")
+        geometry_issues.extend(validate_command_dimensions(result, command))
+        if geometry_issues:
+            result["cad_command"] = None
+            result["questions"] = list(result.get("questions") or []) + geometry_issues
+            result["warnings"] = list(result.get("warnings") or []) + [
+                "Đã khóa tự động dựng hình vì kiểm tra tỷ lệ/kích thước không đạt. Không ghi hình học vào IPT."
+            ]
+        else:
+            try:
+                if command.get("op") == "create_rectangle_extrude":
+                    from inventor_geometry import validate_rectangle_command
+                    validate_rectangle_command(command)
+                elif command.get("op") == "create_circle_extrude":
+                    from inventor_geometry import validate_circle_command
+                    validate_circle_command(command)
+                else:
+                    from inventor_geometry import validate_profile_command
+                    validate_profile_command(command)
+            except Exception as exc:
+                result["cad_command"] = None
+                result["questions"] = list(result.get("questions") or []) + [
+                    "Lệnh hình học AI đề xuất không hợp lệ: " + str(exc)
+                ]
+                result["warnings"] = list(result.get("warnings") or []) + [
+                    "Không tạo lệnh CAD vì biên dạng không vượt qua kiểm tra hình học."
+                ]
+    else:
+        result["scale_verification"] = verify_scale_references(vector_report, result)
+
+    return result
 
 def build_command_document(
     analysis: dict[str, Any],
