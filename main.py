@@ -11,8 +11,9 @@ from PySide6.QtWidgets import (
 )
 from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
 from inventor_geometry import create_rectangle_extrude, validate_rectangle_command, create_circle_extrude, validate_circle_command
+from pdf_vector import analyze_pdf_vector, format_analysis_summary, save_analysis_report
 
-APP_TITLE = "PDF2Inventor AI · V0.5 Sketch + Extrude"
+APP_TITLE = "PDF2Inventor Local Edition · V0.6"
 SCHEMA_VERSION = "0.2"
 
 def now():
@@ -112,8 +113,20 @@ class MainWindow(QMainWindow):
         split.addWidget(self.page_list); split.addWidget(self.preview)
         split.setSizes([180, 1000])
         root.addWidget(split, 1)
-        self.pdf_info = QLabel("PDF được xử lý tại máy tính, không tự động gửi lên ChatGPT.")
+        self.pdf_info = QLabel("PDF được xử lý tại máy tính, không tự động gửi lên dịch vụ AI.")
         root.addWidget(self.pdf_info)
+        analysis_row = QHBoxLayout()
+        analyze_btn = QPushButton("Phân tích PDF vector tại máy")
+        analyze_btn.clicked.connect(self.analyze_current_pdf)
+        save_report_btn = QPushButton("Xuất báo cáo JSON")
+        save_report_btn.clicked.connect(self.export_pdf_analysis)
+        analysis_row.addWidget(analyze_btn)
+        analysis_row.addWidget(save_report_btn)
+        root.addLayout(analysis_row)
+        self.pdf_analysis_view = QTextEdit()
+        self.pdf_analysis_view.setReadOnly(True)
+        self.pdf_analysis_view.setPlaceholderText("Báo cáo phân tích vector, text và kích thước sẽ hiển thị tại đây.")
+        root.addWidget(self.pdf_analysis_view, 1)
         return w
 
     def build_chat_tab(self):
@@ -344,6 +357,40 @@ class MainWindow(QMainWindow):
         self.preview.setPixmap(QPixmap.fromImage(img).scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         txt = page.get_text("text").strip()
         self.pdf_info.setText(f"Trang {index+1}/{self.pdf.page_count} · {len(page.get_drawings())} vector paths · {len(page.get_images(full=True))} ảnh · {len(txt)} ký tự text")
+
+    def analyze_current_pdf(self):
+        if not self.pdf_path:
+            QMessageBox.information(self, "Chưa có PDF", "Hãy mở bản vẽ PDF trước.")
+            return
+        try:
+            self.statusBar().showMessage("Đang phân tích vector PDF cục bộ...")
+            QApplication.processEvents()
+            self.pdf_analysis = analyze_pdf_vector(self.pdf_path)
+            self.pdf_analysis_view.setPlainText(format_analysis_summary(self.pdf_analysis))
+            summary = self.pdf_analysis.get("summary", {})
+            self.statusBar().showMessage(
+                f"Phân tích xong · {summary.get('total_vector_paths', 0)} vector paths · Không gửi dữ liệu ra ngoài."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi phân tích PDF", str(e))
+            self.statusBar().showMessage("Phân tích PDF thất bại.")
+
+    def export_pdf_analysis(self):
+        if not getattr(self, "pdf_analysis", None):
+            self.analyze_current_pdf()
+        if not getattr(self, "pdf_analysis", None):
+            return
+        default_name = Path(self.pdf_path).stem + "_PDF_Vector_Analysis.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Lưu báo cáo phân tích PDF", default_name, "JSON (*.json)"
+        )
+        if path:
+            try:
+                save_analysis_report(self.pdf_analysis, path)
+                self.statusBar().showMessage("Đã lưu báo cáo phân tích: " + path)
+                QMessageBox.information(self, "Đã xuất báo cáo", "Đã lưu báo cáo JSON tại:\\n" + path)
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi lưu báo cáo", str(e))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
