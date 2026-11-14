@@ -124,7 +124,7 @@ def _path_record(index: int, path: dict[str, Any]) -> dict[str, Any] | None:
         "id": index,
         "bbox_pt": bbox,
         "size_pt": [round(width, 3), round(height, 3)],
-        "closed": bool(path.get("closePath", False)),
+        "closed": bool(path.get("closePath", False)) or any(segment[0] == "R" for segment in segments),
         "segment_count": len(segments),
         "segments_truncated": len(path.get("items", []) or []) > MAX_SEGMENTS_PER_PATH,
         "has_curve": any(segment[0] == "C" for segment in segments),
