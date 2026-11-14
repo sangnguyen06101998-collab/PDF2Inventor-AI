@@ -66,6 +66,7 @@ def connect_inventor():
     global _COM_INITIALIZED
     try:
         import pythoncom
+        import pywintypes
         import win32com.client
     except Exception as exc:
         raise InventorBridgeError(
@@ -80,7 +81,7 @@ def connect_inventor():
             _COM_INITIALIZED = True
 
         progid = "Inventor.Application"
-        clsid = pythoncom.CLSIDFromProgID(progid)
+        clsid = pywintypes.IID(progid)
 
         # First obtain the already-running COM object using its resolved CLSID.
         try:
