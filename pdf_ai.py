@@ -533,6 +533,25 @@ def verify_scale_references(
         result["reason"] = "Cần ít nhất một chuẩn vector theo trục X và một chuẩn theo trục Y trên cùng hình chiếu."
         return result
 
+    command = analysis.get("cad_command") or {}
+    if command.get("op") == "create_profile_extrude":
+        try:
+            profile_path_id = int(command.get("profile_vector_path_id"))
+        except (TypeError, ValueError):
+            result["reason"] = "Thiếu ID vector đường bao ngoài để liên kết chuẩn đo với biên dạng."
+            return result
+        for axis in ("x", "y"):
+            matching = [
+                item for item in checked
+                if item["axis"] == axis and item["vector_path_id"] == profile_path_id
+            ]
+            if not matching:
+                result["reason"] = (
+                    "Chuẩn đo trục " + axis.upper()
+                    + " không tham chiếu trực tiếp tới vector đường bao ngoài đã chọn."
+                )
+                return result
+
     all_ratios = ratios["x"] + ratios["y"]
     mean_ratio = sum(all_ratios) / len(all_ratios)
     spread = (max(all_ratios) - min(all_ratios)) / mean_ratio if mean_ratio else 1.0
