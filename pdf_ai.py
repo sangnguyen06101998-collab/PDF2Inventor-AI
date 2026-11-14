@@ -14,6 +14,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from pdf_vector import compact_vector_context, extract_pdf_vector_report
+
 
 API_URL = "https://api.openai.com/v1/responses"
 DEFAULT_MODEL = "gpt-4.1"
