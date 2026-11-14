@@ -3,6 +3,9 @@ name: Build PDF2Inventor AI for Windows
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/v0.4-inventor-com
 
 permissions:
   contents: read
