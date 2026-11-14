@@ -955,6 +955,12 @@ def analyze_pdf(
 
         scale_verification = verify_scale_references(vector_report, result)
         result["scale_verification"] = scale_verification
+        if scale_verification.get("verified"):
+            result["scale_status"] = "verified"
+        elif "sai khác" in str(scale_verification.get("reason", "")) or "không khớp" in str(scale_verification.get("reason", "")):
+            result["scale_status"] = "conflict"
+        else:
+            result["scale_status"] = "unverified"
         geometry_issues = []
         if result.get("scale_status") != "verified" or not scale_verification.get("verified"):
             geometry_issues.append(
@@ -1013,7 +1019,14 @@ def analyze_pdf(
                     "Không tạo lệnh CAD vì biên dạng không vượt qua kiểm tra hình học."
                 ]
     else:
-        result["scale_verification"] = verify_scale_references(vector_report, result)
+        scale_verification = verify_scale_references(vector_report, result)
+        result["scale_verification"] = scale_verification
+        if scale_verification.get("verified"):
+            result["scale_status"] = "verified"
+        elif "sai khác" in str(scale_verification.get("reason", "")) or "không khớp" in str(scale_verification.get("reason", "")):
+            result["scale_status"] = "conflict"
+        else:
+            result["scale_status"] = "unverified"
 
     return result
 
