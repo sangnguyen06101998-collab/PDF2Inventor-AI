@@ -306,6 +306,7 @@ class VectorScaleVerificationTests(unittest.TestCase):
     def test_scale_conflict_fails_when_x_and_y_are_inconsistent(self):
         report = self.vector_report()
         analysis = {
+            "units": "mm",
             "geometry_view": "Front",
             "geometry_page": 1,
             "scale_references": [
