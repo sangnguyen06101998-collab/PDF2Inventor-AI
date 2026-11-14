@@ -96,6 +96,7 @@ class FakePythonCom:
 class InventorBridgeTests(unittest.TestCase):
     def test_connect_initializes_com_and_attaches_to_running_inventor(self):
         fake_pythoncom = FakePythonCom()
+        fake_pywintypes = SimpleNamespace(IID=lambda value: "{FAKE-INVENTOR-CLSID}")
         client_module = ModuleType("win32com.client")
         client_module.Dispatch = lambda dispatch: dispatch.QueryInterface(None)
         win32com_module = ModuleType("win32com")
@@ -103,6 +104,7 @@ class InventorBridgeTests(unittest.TestCase):
 
         with patch.dict(sys.modules, {
             "pythoncom": fake_pythoncom,
+            "pywintypes": fake_pywintypes,
             "win32com": win32com_module,
             "win32com.client": client_module,
         }):
@@ -114,6 +116,7 @@ class InventorBridgeTests(unittest.TestCase):
 
     def test_connect_error_includes_hresult_diagnostic(self):
         fake_pythoncom = FakePythonCom(fail_active=True)
+        fake_pywintypes = SimpleNamespace(IID=lambda value: "{FAKE-INVENTOR-CLSID}")
         client_module = ModuleType("win32com.client")
         win32com_module = ModuleType("win32com")
         win32com_module.client = client_module
