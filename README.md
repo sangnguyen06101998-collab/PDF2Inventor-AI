@@ -6,8 +6,8 @@ Nạp bản vẽ PDF trực tiếp vào phần mềm, để AI thị giác đọ
 ## Quy trình
 1. Mở PDF2Inventor AI V0.6.
 2. Kéo thả PDF vào cửa sổ hoặc nhấn Mở PDF.
-3. Mở Inventor 2018, mở một file Part (.ipt) đã lưu. Nên dùng IPT mới/trống khi dựng chi tiết mới từ PDF.
-4. Trong tab AI đọc bản vẽ, nhấn Gắn IPT Inventor đang mở. Nếu chưa chọn chi tiết trong dự án, ứng dụng tạo một hồ sơ component và gắn với IPT đang mở.
+3. Mở Inventor 2018 và kết nối ứng dụng với Inventor.
+4. Trong tab AI đọc bản vẽ, nhấn Tạo IPT mới và chọn nơi lưu; ứng dụng tạo Part từ template Inventor mặc định, tự gắn vào dự án và tự lưu hồ sơ JSON cạnh file IPT. Nếu đã có một IPT trống đang mở, có thể dùng Gắn IPT đang mở.
 5. Nhập OpenAI API Key và nhấn Lưu cấu hình và khóa an toàn. Cấu hình model mặc định là gpt-4.1; có thể đổi tên model nếu tài khoản API được cấp quyền khác.
 6. Chọn mức chi tiết PDF (Cao cho bản vẽ cơ khí có kích thước nhỏ).
 7. Nhấn ĐỌC PDF VÀ PHÂN TÍCH. Ứng dụng gửi PDF tới OpenAI Responses API để AI đọc nội dung chữ và ảnh các trang.
