@@ -1,4 +1,8 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 from pdf_ai import (
     PdfAIError,
@@ -6,6 +10,7 @@ from pdf_ai import (
     build_command_document,
     format_analysis_report,
     _extract_output_text,
+    analyze_pdf,
 )
 
 
@@ -103,6 +108,72 @@ class PdfAiSchemaTests(unittest.TestCase):
             }]
         }
         self.assertEqual(_extract_output_text(response), '{"ok":true}')
+
+    def test_schema_includes_polygon_profile_and_hole_data(self):
+        schema = analysis_schema()
+        command = schema["properties"]["cad_command"]["anyOf"][0]
+        self.assertIn("points", command["properties"])
+        self.assertIn("holes", command["properties"])
+        self.assertIn("create_profile_extrude", command["properties"]["op"]["enum"])
+
+    def test_analyze_pdf_sends_pdf_file_as_vision_input(self):
+        analysis_json = json.dumps({
+            "drawing_type": "single_part",
+            "drawing_title": "Plate",
+            "part_name": "Plate",
+            "units": "mm",
+            "overall_length_mm": 100,
+            "overall_width_mm": 50,
+            "overall_height_mm": 8,
+            "views_detected": ["Front"],
+            "dimensions_detected": [],
+            "feature_summary": ["Flat rectangular plate"],
+            "manufacturing_notes": [],
+            "confidence": "high",
+            "cad_command": None,
+            "questions": ["Confirm whether holes are required."],
+            "warnings": [],
+        })
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"output_text": analysis_json}).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "drawing.pdf"
+            path.write_bytes(b"%PDF-1.4 test fixture")
+            with patch("pdf_ai.urllib.request.urlopen", side_effect=fake_urlopen):
+                result = analyze_pdf(
+                    pdf_path=str(path),
+                    api_key="sk-test",
+                    model="gpt-4.1",
+                    detail="high",
+                    project_id="PROJECT_1",
+                    component_id="PART_1",
+                    part_name="Test plate",
+                    document_path="C:/CAD/Test.ipt",
+                )
+
+        self.assertEqual(result["part_name"], "Plate")
+        self.assertFalse(captured["body"]["store"])
+        file_item = captured["body"]["input"][0]["content"][0]
+        self.assertEqual(file_item["type"], "input_file")
+        self.assertEqual(file_item["filename"], "drawing.pdf")
+        self.assertEqual(file_item["detail"], "high")
+        self.assertTrue(file_item["file_data"].startswith("data:application/pdf;base64,"))
+        self.assertGreater(captured["timeout"], 0)
 
     def test_refusal_is_reported(self):
         response = {
