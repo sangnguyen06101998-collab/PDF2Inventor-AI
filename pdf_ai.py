@@ -203,6 +203,19 @@ def analysis_schema() -> dict[str, Any]:
         },
         "profile_vector_path_id": {"type": ["integer", "null"]},
         "hole_vector_path_ids": {"type": "array", "items": {"type": "integer"}},
+        "inner_vector_path_ids": {"type": "array", "items": {"type": "integer"}},
+        "cutouts": {
+            "type": "array",
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+                    "required": ["x", "y"],
+                    "additionalProperties": False,
+                },
+            },
+        },
         "holes": {
             "type": "array",
             "items": {
@@ -313,8 +326,8 @@ YÊU CẦU PHÂN TÍCH:
 11. Dùng scale_references để trỏ chính xác tới đoạn vector thẳng tương ứng với kích thước số: page (1-based), vector_path_id (id trong page_details.paths), segment_index (0-based trong segments), axis (x/y/z), view, dimension_text và value_mm. measured_length_pt phải là chiều dài hình học thật của đoạn vector tính theo PDF point; mm_per_pt=value_mm/measured_length_pt.
 12. Cần ít nhất hai chuẩn đo trong cùng geometry_view và geometry_page: một trục x và một trục y. Các tỷ lệ mm_per_pt phải khớp nhau trong 2%. Nếu không tìm được đoạn vector thật đúng với đường bao chi tiết (không chọn đường kích thước/mũi tên/khung giấy), scale_status=unverified và cad_command=null.
 13. Số kích thước ghi trực tiếp (mm/inch) là chuẩn cuối cùng. Vector scale chỉ để hiệu chuẩn/toạ độ và kiểm tra chéo; không được scale hình học để thay đổi kích thước ghi số.
-14. Khi tạo create_profile_extrude, KHÔNG tự vẽ points bằng cách ước lượng. Điền profile_vector_path_id là id của một polyline vector kín thể hiện đúng đường bao ngoài trong page_details.paths. Điền hole_vector_path_ids là các id vector đường tròn kín cho lỗ xuyên (nếu có); phần mềm sẽ lấy tọa độ vector và hiệu chuẩn thành mm.
-15. Không chọn khung giấy, khung tên, đường kích thước, đường tâm hoặc đường gióng làm đường bao chi tiết. Path ngoài phải là đường bao khép kín và đường tròn lỗ phải được xác định rõ.
+14. Khi tạo create_profile_extrude, KHÔNG tự vẽ points bằng cách ước lượng. Điền profile_vector_path_id là id của một path vector kín thể hiện đúng đường bao ngoài trong page_details.paths. Điền hole_vector_path_ids là các id vector đường tròn kín cho lỗ tròn xuyên; điền inner_vector_path_ids cho rãnh/cửa sổ/lỗ không tròn có đường bao kín. Phần mềm sẽ tự lấy tọa độ vector và hiệu chuẩn thành mm; points, holes và cutouts trả về mảng rỗng/null.
+15. Không chọn khung giấy, khung tên, đường kích thước, đường tâm hoặc đường gióng làm đường bao chi tiết. Đường bao ngoài, lỗ tròn và các cửa sổ phải là path khép kín, đúng hình chiếu chính.
 16. Nếu số kích thước trên bản vẽ mâu thuẫn với chiều dài vector hoặc các tỷ lệ giữa X/Y sai khác quá 2%, đánh dấu conflict, không tạo cad_command.
 
 GIỚI HẠN CAD HIỆN TẠI:
@@ -325,7 +338,7 @@ GIỚI HẠN CAD HIỆN TẠI:
 - Không được dùng component_id khác với component_id được cung cấp.
 - Nếu đề xuất create_rectangle_extrude: điền length, width, thickness bằng mm; các trường khác không dùng thì null; unit=mm; operation=new_body; direction=positive; origin_x=origin_y=0 trừ khi bản vẽ chỉ rõ tọa độ đặt khác.
 - Nếu đề xuất create_circle_extrude: điền diameter và thickness bằng mm; các trường hình học không dùng thì null hoặc mảng rỗng; unit=mm; operation=new_body; direction=positive; center_x=center_y=0 trừ khi bản vẽ chỉ rõ vị trí khác.
-- Nếu đề xuất create_profile_extrude: points để null; điền profile_vector_path_id và hole_vector_path_ids trỏ đến path ID vector trong trang geometry_page. Phần mềm sẽ chuyển đường bao/lỗ từ PDF point sang mm bằng mm_per_pt đã xác minh. Điền thickness bằng mm; unit=mm; operation=new_body; direction=positive. Các trường riêng cho hình chữ nhật/hình tròn phải null.
+- Nếu đề xuất create_profile_extrude: points=null, holes=[], cutouts=[], điền profile_vector_path_id và các mảng hole_vector_path_ids/inner_vector_path_ids trỏ đến path ID vector trong trang geometry_page. Phần mềm chuyển đường bao, lỗ tròn và cutout từ PDF point sang mm bằng mm_per_pt đã xác minh. Điền thickness bằng mm; unit=mm; operation=new_body; direction=positive.
 - Không dùng lệnh cut hoặc tự phối hợp nhiều feature trong bản phát hành này.
 
 DỮ LIỆU VECTOR PDF (JSON, tọa độ point của PDF; không phải mm):
