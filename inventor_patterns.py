@@ -37,6 +37,20 @@ def validate_pattern(command):
             raise InventorBridgeError("angle_deg phải trong khoảng (0, 360].")
         result["angle_deg"] = float(angle)
         result["natural_axis_direction"] = bool(command.get("natural_axis_direction", True))
+    else:
+        count_y = command.get("count_y", 1)
+        spacing_y = command.get("spacing_y_mm", 0)
+        axis_y = command.get("axis_y_index", 2)
+        if isinstance(count_y, bool) or not isinstance(count_y, int) or count_y < 1:
+            raise InventorBridgeError("count_y phải là số nguyên >= 1.")
+        if isinstance(spacing_y, bool) or not isinstance(spacing_y, (int, float)) or not math.isfinite(float(spacing_y)) or spacing_y < 0:
+            raise InventorBridgeError("spacing_y_mm phải là số hữu hạn không âm.")
+        if isinstance(axis_y, bool) or not isinstance(axis_y, int) or axis_y < 1:
+            raise InventorBridgeError("axis_y_index phải là số nguyên dương.")
+        if count == 1 and count_y == 1:
+            raise InventorBridgeError("Rectangular pattern cần count hoặc count_y lớn hơn 1.")
+        result.update({"count_y": count_y, "spacing_y_mm": float(spacing_y),
+                       "axis_y_index": axis_y, "natural_y_direction": bool(command.get("natural_y_direction", True))})
     return result
 
 
@@ -73,6 +87,11 @@ def create_pattern(document, inventor_app, command):
             definition = patterns.CreateDefinition(
                 objects, axis, True, cfg["count"], f'{cfg["spacing_mm"]:.12g} mm'
             )
+            if cfg["count_y"] > 1:
+                definition.YDirectionEntity = component.WorkAxes.Item(cfg["axis_y_index"])
+                definition.YCount = cfg["count_y"]
+                definition.YSpacing = f'{cfg["spacing_y_mm"]:.12g} mm'
+                definition.NaturalYDirection = cfg["natural_y_direction"]
         feature = patterns.AddByDefinition(definition)
         feature.Name = "P2I_CircularPattern" if cfg["op"] == "create_circular_pattern" else "P2I_RectangularPattern"
         document.Update()
