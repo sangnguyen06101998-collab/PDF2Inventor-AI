@@ -16,6 +16,23 @@ class AdvancedProfileValidationTests(unittest.TestCase):
         self.assertEqual(len(result["loops"]),2)
         self.assertEqual(result["distance"],8)
 
+    def test_valid_closed_line_arc_profile(self):
+        c=self.valid()
+        c["loops"]=[{"type":"segments","segments":[
+            {"type":"line","start":[0,0],"end":[40,0]},
+            {"type":"arc","start":[40,0],"end":[0,0],"center":[20,0],"counterclockwise":True}
+        ]}]
+        result=validate_advanced_profile(c)
+        self.assertEqual(result["loops"][0]["type"],"segments")
+
+    def test_rejects_open_segment_profile(self):
+        c=self.valid()
+        c["loops"]=[{"type":"segments","segments":[
+            {"type":"line","start":[0,0],"end":[40,0]},
+            {"type":"line","start":[40,1],"end":[0,0]}
+        ]}]
+        with self.assertRaises(InventorBridgeError): validate_advanced_profile(c)
+
     def test_rejects_missing_units(self):
         c=self.valid(); c.pop("unit")
         with self.assertRaises(InventorBridgeError): validate_advanced_profile(c)
