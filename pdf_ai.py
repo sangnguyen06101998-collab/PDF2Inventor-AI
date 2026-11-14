@@ -734,36 +734,54 @@ def derive_profile_from_vectors(
 
     holes = []
     cutouts = []
-    all_inner_ids = list(dict.fromkeys(
-        [int(item) for item in (hole_path_ids or [])]
-        + [int(item) for item in (inner_path_ids or [])]
-    ))
-    for index, inner_path_id in enumerate(all_inner_ids, 1):
-        inner_path = _page_path(vector_report, page_number, inner_path_id)
+
+    def append_circle_hole(inner_path: dict[str, Any], index: int) -> None:
+        if not inner_path.get("closed") or not inner_path.get("has_circle_or_arc_candidate"):
+            raise PdfAIError(
+                f"Vector lỗ tròn số {index} không được nhận dạng chắc chắn là đường tròn/đường cung kín."
+            )
+        bbox = inner_path.get("bbox_pt")
+        if not bbox or len(bbox) != 4:
+            raise PdfAIError(f"Không đọc được khung bao vector lỗ số {index}.")
+        x0, y0, x1, y1 = [float(value) for value in bbox]
+        width_pt, height_pt = x1 - x0, y1 - y0
+        if width_pt <= 0 or height_pt <= 0:
+            raise PdfAIError(f"Kích thước vector lỗ số {index} không hợp lệ.")
+        ratio_error = abs(width_pt - height_pt) / max(width_pt, height_pt)
+        if ratio_error > 0.02:
+            raise PdfAIError(
+                f"Vector lỗ số {index} không đủ tròn (sai khác đường kính {ratio_error*100:.2f}%)."
+            )
+        center_x_pt, center_y_pt = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        holes.append({
+            "center_x": round((center_x_pt - min_x) * mm_per_pt, 4),
+            "center_y": round((max_y - center_y_pt) * mm_per_pt, 4),
+            "diameter": round(((width_pt + height_pt) / 2.0) * mm_per_pt, 4),
+        })
+
+    seen_ids = set()
+    for index, hole_path_id in enumerate(hole_path_ids or [], 1):
+        path_id = int(hole_path_id)
+        if path_id in seen_ids:
+            continue
+        seen_ids.add(path_id)
+        inner_path = _page_path(vector_report, page_number, path_id)
+        if inner_path is None:
+            raise PdfAIError(f"Không tìm thấy vector lỗ tròn số {index}.")
+        append_circle_hole(inner_path, index)
+
+    for index, inner_path_id in enumerate(inner_path_ids or [], 1):
+        path_id = int(inner_path_id)
+        if path_id in seen_ids:
+            continue
+        seen_ids.add(path_id)
+        inner_path = _page_path(vector_report, page_number, path_id)
         if inner_path is None:
             raise PdfAIError(f"Không tìm thấy vector lỗ/cửa sổ số {index}.")
         if not inner_path.get("closed"):
             raise PdfAIError(f"Vector lỗ/cửa sổ số {index} không khép kín.")
-        bbox = inner_path.get("bbox_pt")
-        if not bbox or len(bbox) != 4:
-            raise PdfAIError(f"Không đọc được khung bao vector lỗ/cửa sổ số {index}.")
-        x0, y0, x1, y1 = [float(value) for value in bbox]
-        width_pt, height_pt = x1 - x0, y1 - y0
-        if width_pt <= 0 or height_pt <= 0:
-            raise PdfAIError(f"Kích thước vector lỗ/cửa sổ số {index} không hợp lệ.")
-
         if inner_path.get("has_circle_or_arc_candidate"):
-            ratio_error = abs(width_pt - height_pt) / max(width_pt, height_pt)
-            if ratio_error > 0.02:
-                raise PdfAIError(
-                    f"Vector lỗ tròn số {index} không đủ tròn (sai khác đường kính {ratio_error*100:.2f}%)."
-                )
-            center_x_pt, center_y_pt = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-            holes.append({
-                "center_x": round((center_x_pt - min_x) * mm_per_pt, 4),
-                "center_y": round((max_y - center_y_pt) * mm_per_pt, 4),
-                "diameter": round(((width_pt + height_pt) / 2.0) * mm_per_pt, 4),
-            })
+            append_circle_hole(inner_path, index)
         else:
             inner_points_pt = _vector_path_points_pt(inner_path, mm_per_pt)
             cutouts.append(_transform_profile_points(inner_points_pt, min_x, max_y, mm_per_pt))
