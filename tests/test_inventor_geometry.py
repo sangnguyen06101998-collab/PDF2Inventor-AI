@@ -23,7 +23,7 @@ class RectangleCommandValidationTests(unittest.TestCase):
         self.assertEqual(result["thickness"], 8)
         self.assertEqual(result["unit"], "mm")
         self.assertEqual(result["direction"], "positive")
-        self.assertEqual(result["parameter_names"]["length"], "P2I_Length")
+        self.assertEqual(result["parameter_names"]["length"], "Length")
 
     def test_rejects_missing_explicit_units(self):
         command = self.valid_command()
