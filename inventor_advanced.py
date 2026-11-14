@@ -69,11 +69,14 @@ def validate_advanced_profile(command):
     operation = str(command.get("operation", "new_body")).lower()
     if operation not in OPERATION_IDS:
         raise InventorBridgeError("operation chỉ nhận join, cut hoặc new_body.")
+    feature_name = str(command.get("feature_name", "P2I_Advanced_Profile_Extrude")).strip()
+    if not feature_name or len(feature_name) > 120:
+        raise InventorBridgeError("feature_name phải có 1–120 ký tự.")
     direction = str(command.get("direction", "positive")).lower()
     if direction not in DIRECTION_IDS:
         raise InventorBridgeError("direction chỉ nhận positive hoặc negative.")
     return {"plane": plane, "loops": normalized, "distance": distance,
-            "operation": operation, "direction": direction, "unit": "mm"}
+            "operation": operation, "direction": direction, "feature_name": feature_name, "unit": "mm"}
 
 
 def create_profile_extrude(document, inventor_app, command):
@@ -120,7 +123,7 @@ def create_profile_extrude(document, inventor_app, command):
         feature = component.Features.ExtrudeFeatures.Add(definition)
         sketch.Visible = False
         sketch.Name = "P2I_Advanced_Profile_Sketch"
-        feature.Name = "P2I_Advanced_Profile_Extrude"
+        feature.Name = cfg["feature_name"]
         document.Update()
         document.Save()
         transaction.End()
