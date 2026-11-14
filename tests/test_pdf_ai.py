@@ -268,6 +268,7 @@ class VectorScaleVerificationTests(unittest.TestCase):
     def test_scale_references_are_recomputed_from_vector_lines(self):
         report = self.vector_report()
         analysis = {
+            "units": "mm",
             "geometry_view": "Front",
             "geometry_page": 1,
             "scale_references": [
