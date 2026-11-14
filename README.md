@@ -1,40 +1,79 @@
-# PDF2Inventor AI V0.4 · Inventor COM
+# PDF2Inventor AI V0.5 · Inventor 2018 Sketch + Extrude
 
-## Chức năng
-- Giữ chế độ ChatGPT thủ công, không dùng API.
-- Tạo/mở/lưu hồ sơ dự án JSON.
+## Chức năng đã có trong mã nguồn
+- Chế độ ChatGPT thủ công, không dùng API trả phí.
+- Tạo, mở và lưu hồ sơ dự án JSON.
 - Mở và xem PDF cục bộ bằng PyMuPDF.
 - Kết nối Autodesk Inventor đang chạy qua COM.
 - Đọc tham số của file IPT đang mở.
-- Liên kết file IPT với một chi tiết trong hồ sơ dự án.
+- Liên kết một file IPT với một chi tiết trong hồ sơ dự án.
 - Đồng bộ tham số Inventor vào hồ sơ.
-- Nhận lệnh JSON `set_parameter`; nếu chi tiết đã liên kết với IPT đang mở, ứng dụng xác nhận trước, tạo bản sao dự phòng, cập nhật tham số Inventor, gọi Update và Save.
-- Ghi lịch sử thay đổi và đường dẫn backup.
+- Nhận lệnh JSON set_parameter; ứng dụng xác nhận, tạo backup, cập nhật tham số, gọi Update và Save.
+- Nhận lệnh JSON create_rectangle_extrude để tạo Sketch hình chữ nhật trên mặt phẳng XY và Extrude thành khối 3D.
+- Sketch chữ nhật được ràng buộc ngang/dọc, cố định góc đầu tiên và có hai kích thước điều khiển bằng tham số người dùng.
+- Chiều sâu Extrude tham chiếu tham số người dùng riêng.
+- operation auto tự chọn Join nếu vùng hình học mới giao với solid hiện có theo bounding box; nếu không giao thì chọn New Body.
+- Mỗi thao tác hình học tạo backup IPT trước khi thực thi; có transaction để hủy thao tác khi phát sinh lỗi.
+- Đọc lại tham số sau khi dựng hình và lưu lịch sử vào hồ sơ dự án.
 
-## Giới hạn V0.4
-- Chỉ hỗ trợ cập nhật tham số của một file chi tiết `.ipt` trong một lần áp dụng.
-- Không tự tạo Sketch/Extrude/Hole mới trong V0.4.
-- Không hỗ trợ sửa IAM, BOM hay các lệnh hình học topo.
-- Cầu nối cần Autodesk Inventor cài trên Windows và đang chạy. EXE không mang Inventor theo.
-- Khi chưa liên kết IPT, lệnh vẫn chỉ cập nhật hồ sơ JSON.
-- PDF hiện mới xem/trích xuất thông tin cơ bản; OCR và nhận dạng bản vẽ nâng cao chưa có.
+## JSON mẫu: dựng hình chữ nhật 150 × 70 × 8 mm
+
+Thay PROJECT_ID_THỰC_TẾ và COMPONENT_ID_THỰC_TẾ bằng đúng mã trong dự án đang mở.
+
+    {
+      "project_id": "PROJECT_ID_THỰC_TẾ",
+      "commands": [
+        {
+          "op": "create_rectangle_extrude",
+          "component_id": "COMPONENT_ID_THỰC_TẾ",
+          "length": 150,
+          "width": 70,
+          "thickness": 8,
+          "origin_x": 200,
+          "origin_y": 0,
+          "unit": "mm",
+          "operation": "auto",
+          "direction": "positive",
+          "reason": "Tạo khối chữ nhật kiểm thử"
+        }
+      ],
+      "questions": [],
+      "warnings": []
+    }
+
+origin_x và origin_y là vị trí góc đầu tiên tính từ gốc tọa độ XY, đơn vị mm. Trong ví dụ trên, hình được đặt tại X=200 mm để tránh chồng lên khối thử đang có tại gốc. Có thể dùng 0 nếu vùng đó còn trống hoặc muốn Join vào khối hiện tại.
+
+operation nhận auto, join hoặc new_body. direction nhận positive hoặc negative. Ba kích thước bắt buộc là số dương và unit bắt buộc là mm.
+
+## Giới hạn V0.5
+- Tạo hình học hiện hỗ trợ một lệnh create_rectangle_extrude trong mỗi gói JSON; không trộn lệnh dựng hình với set_parameter trong cùng gói.
+- Hình chữ nhật dựng trên mặt phẳng XY gốc; chưa có chọn mặt phẳng hoặc mặt nghiêng.
+- Chưa hỗ trợ đường tròn, biên dạng tự do, Hole, Cut, Fillet, Chamfer, Pattern hoặc chỉnh sửa IAM.
+- Không tự động nhận dạng kích thước PDF. Người dùng và ChatGPT cần xác định kích thước trước khi phát lệnh.
+- Join trong chế độ auto được ước lượng theo bounding box; nếu hình học thực không giao nhau, Inventor có thể từ chối Join và thông báo lỗi.
+- V0.5 cần được thử nghiệm trên Inventor 2018 thực tế. Kiểm thử CI xác nhận cấu trúc, validation và khả năng build; không thay thế kiểm thử CAD COM trên máy người dùng.
+- Bridge hiện làm việc với một file IPT đã liên kết và đang mở trong Inventor.
 
 ## Cách sử dụng
-1. Mở Autodesk Inventor 2018 và mở file IPT cần điều khiển.
-2. Mở PDF2Inventor AI.
-3. Vào tab Inventor 2018 → Kết nối Inventor.
-4. Vào tab Dự án CAD, chọn chi tiết cần liên kết.
-5. Quay lại tab Inventor 2018 → Gắn IPT vào chi tiết đã chọn.
-6. Nhấn Đọc tham số vào hồ sơ.
-7. Tạo gói ngữ cảnh, gửi ChatGPT thủ công và nhập JSON lệnh.
-8. Kiểm tra lệnh; nhấn Áp dụng và xác nhận. Ứng dụng sẽ tạo backup trước khi sửa IPT.
+1. Mở Inventor 2018 và mở file IPT đã lưu.
+2. Mở PDF2Inventor AI V0.5.
+3. Trong tab Inventor 2018, nhấn Kết nối Inventor.
+4. Trong tab Dự án CAD, chọn chi tiết cần điều khiển.
+5. Trong tab Inventor 2018, nhấn Gắn IPT vào chi tiết.
+6. Nhấn Đồng bộ tham số để lấy dữ liệu mới nhất.
+7. Vào ChatGPT thủ công và tạo gói ngữ cảnh.
+8. Gửi ngữ cảnh cùng yêu cầu cho ChatGPT; nhập JSON trả về vào tab Nhập lệnh CAD.
+9. Nhấn Kiểm tra lệnh. Đọc kích thước và vị trí trước khi nhấn Áp dụng lệnh.
+10. Xác nhận thao tác trong hộp thoại. Sau khi hoàn tất, kiểm tra mô hình và nhật ký Inventor.
 
 ## Build EXE
-Chạy GitHub Actions workflow `Build PDF2Inventor AI for Windows` trên nhánh `feature/v0.4-inventor-com`. Tải artifact `PDF2Inventor_AI_Windows_x64` khi build thành công.
+GitHub Actions workflow Build PDF2Inventor AI for Windows tự chạy khi có commit trên nhánh feature/v0.5-sketch-extrude. Khi build thành công, tải artifact PDF2Inventor_AI_Windows_x64 trong trang Actions của GitHub.
 
 Người dùng cuối không cần cài Python. Máy build GitHub Actions cài Python, PySide6, PyMuPDF, pywin32 và PyInstaller.
 
-## An toàn
-- Không ghi đè nhánh `main`; V0.4 được phát triển trên nhánh riêng `feature/v0.4-inventor-com`.
-- Mỗi lần cập nhật tham số IPT đều tạo file backup bên cạnh file gốc.
-- Nếu cập nhật thất bại, cầu nối cố gắng khôi phục biểu thức tham số cũ và báo vị trí backup.
+## An toàn và phát triển
+- Không sửa nhánh main; V0.5 phát triển riêng trên feature/v0.5-sketch-extrude, dựa trên nhánh V0.4 đã kiểm chứng kết nối Inventor.
+- Trước thao tác tham số/hình học, ứng dụng yêu cầu xác nhận.
+- Các thay đổi thật trên IPT tạo file backup bên cạnh file gốc.
+- Nếu tạo hình học thất bại, ứng dụng cố gắng hủy transaction và báo đường dẫn backup.
+- Chỉ phát hành EXE V0.5 sau khi kiểm thử tự động/build thành công và kiểm tra thực tế trên Inventor 2018.
