@@ -380,10 +380,17 @@ class MainWindow(QMainWindow):
         comp["parameters"] = params
         self.refresh_project_view()
         self.component_list.setCurrentRow(row)
-        if self.project_path:
-            save_json(self.project_path, self.project)
+        if not self.project_path:
+            candidate = Path(path).with_name(Path(path).stem + "_PDF2Inventor.json")
+            if candidate.exists():
+                candidate = Path(path).with_name(
+                    Path(path).stem + "_PDF2Inventor_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".json"
+                )
+            self.project_path = str(candidate)
+        save_json(self.project_path, self.project)
         self.ai_status_label.setText(
             "Đã gắn chi tiết " + str(comp["component_id"]) + " với IPT: " + path
+            + "\nHồ sơ dự án đã lưu: " + self.project_path
         )
         self.inv_log.append("AI TARGET IPT: " + path + " · COMPONENT: " + str(comp["component_id"]))
         return True
