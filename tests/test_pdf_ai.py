@@ -1,5 +1,6 @@
 import unittest
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -11,7 +12,18 @@ from pdf_ai import (
     format_analysis_report,
     _extract_output_text,
     analyze_pdf,
+    _dpapi_crypt,
 )
+
+
+class WindowsDpapiTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows DPAPI is only available on Windows.")
+    def test_windows_dpapi_round_trip(self):
+        original = b"PDF2Inventor test API key"
+        protected = _dpapi_crypt(original)
+        self.assertNotEqual(protected, original)
+        restored = _dpapi_crypt(protected, decrypt=True)
+        self.assertEqual(restored, original)
 
 
 class PdfAiSchemaTests(unittest.TestCase):
