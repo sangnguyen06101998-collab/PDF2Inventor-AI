@@ -465,6 +465,16 @@ class MainWindow(QMainWindow):
     def on_pdf_ai_analysis_ready(self, analysis):
         self.ai_analyze_button.setEnabled(True)
         self.ai_analysis = analysis
+        self.project["pdf_analysis"] = {
+            "timestamp": now(),
+            "source_pdf": os.path.basename(self.pdf_path or ""),
+            "component_id": getattr(self, "ai_target_component_id", ""),
+            "result": analysis,
+        }
+        self.project["source_pdf"] = os.path.basename(self.pdf_path or "")
+        if self.project_path:
+            try: save_json(self.project_path, self.project)
+            except Exception as e: self.ai_status_label.setText("Đã phân tích nhưng chưa lưu được hồ sơ: " + str(e))
         report = format_analysis_report(analysis)
         if analysis.get("cad_command"):
             try:
