@@ -9,6 +9,10 @@ on:
       - feature/v0.5-sketch-extrude
       - feature/v0.6-pdf-vision-auto
 
+concurrency:
+  group: pdf2inventor-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
