@@ -382,6 +382,28 @@ def _line_segment_length(page_record: dict[str, Any], path_id: int, segment_inde
     return math.hypot(x2 - x1, y2 - y1), [x1, y1, x2, y2]
 
 
+def _dimension_text_value_mm(value: Any, default_units: str = "mm") -> float | None:
+    numeric = _numeric_token(value)
+    if numeric is None:
+        return None
+    text = str(value or "").strip().lower().replace(",", ".")
+    if re.search(r'\b(?:inch|in)\b|["”]', text):
+        return numeric * 25.4
+    if re.search(r'\bcm\b', text):
+        return numeric * 10.0
+    if re.search(r'\bmm\b', text):
+        return numeric
+    if re.search(r'\bm\b', text):
+        return numeric * 1000.0
+    if default_units == "inch":
+        return numeric * 25.4
+    if default_units == "cm":
+        return numeric * 10.0
+    if default_units == "m":
+        return numeric * 1000.0
+    return numeric
+
+
 def verify_scale_references(
     vector_report: dict[str, Any] | None,
     analysis: dict[str, Any],
@@ -443,9 +465,21 @@ def verify_scale_references(
         if actual_length is None or endpoints is None or actual_length <= 1e-6:
             issues.append(f"Chuẩn đo {index} không tham chiếu tới đoạn thẳng vector hợp lệ.")
             continue
-        actual_text_value = _numeric_token(reference.get("dimension_text"))
+        default_units = str(analysis.get("units") or "mm").lower()
+        actual_text_value = _dimension_text_value_mm(reference.get("dimension_text"), default_units)
         if actual_text_value is None or abs(actual_text_value - declared_value) > max(0.05, declared_value * 0.0005):
             issues.append(f"Chuẩn đo {index}: số ghi trên chú thích không khớp giá trị mm đã khai báo.")
+            continue
+        page_dimension_lines = page_record.get("dimension_text_candidates") or []
+        text_found = any(
+            (
+                (candidate_mm := _dimension_text_value_mm(candidate, default_units)) is not None
+                and abs(candidate_mm - declared_value) <= max(0.05, declared_value * 0.0005)
+            )
+            for candidate in page_dimension_lines
+        )
+        if not text_found:
+            issues.append(f"Chuẩn đo {index}: không tìm thấy kích thước số tương ứng trong text gốc của trang PDF.")
             continue
         if abs(claimed_length - actual_length) > max(0.1, actual_length * 0.02):
             issues.append(f"Chuẩn đo {index}: chiều dài đoạn vector AI khai báo không khớp dữ liệu PDF.")
