@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
 from inventor_geometry import create_rectangle_extrude, validate_rectangle_command, create_circle_extrude, validate_circle_command
 from pdf_vector import analyze_pdf_vector, format_analysis_summary, save_analysis_report
+from inventor_advanced import create_profile_extrude, validate_advanced_profile
 
 APP_TITLE = "PDF2Inventor Local Edition · V0.6"
 SCHEMA_VERSION = "0.2"
@@ -495,7 +496,7 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude"}]
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"}]
             if geometry_commands and len(commands) != 1:
                 issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
             for i, cmd in enumerate(commands, 1):
@@ -529,8 +530,15 @@ class MainWindow(QMainWindow):
                         validate_circle_command(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_profile_extrude":
+                    if not comp.get("inventor_file"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_advanced_profile(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
                 else:
-                    issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.5.")
+                    issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.6.")
             if not commands and not data.get("questions"):
                 issues.append("Không có lệnh hoặc câu hỏi nào.")
             self.pending_commands = data
@@ -559,7 +567,7 @@ class MainWindow(QMainWindow):
             targets.append((comp, cmd))
 
         # Geometry operations are intentionally a single-command transaction in V0.5.
-        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude"}:
+        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
             try:
@@ -574,11 +582,14 @@ class MainWindow(QMainWindow):
                     f'Dài X: {cmd["length"]} mm · Rộng Y: {cmd["width"]} mm · '
                     f'Đùn Z: {cmd["thickness"]} mm · Gốc: ({cmd.get("origin_x", 0)}, {cmd.get("origin_y", 0)}) mm'
                 )
-            else:
+            elif cmd["op"] == "create_circle_extrude":
                 dims = (
                     f'Đường kính: {cmd["diameter"]} mm · Đùn/Cắt Z: {cmd["thickness"]} mm · '
                     f'Tâm: ({cmd.get("center_x", 0)}, {cmd.get("center_y", 0)}) mm'
                 )
+            else:
+                dims = (f'Biên dạng tùy chỉnh: {len(cmd["loops"])} vòng kín · Mặt phẳng: {cmd["plane"]} · '
+                        f'Chiều đùn: {cmd["distance"]} mm · Operation: {cmd["operation"]}')
             intro = (
                 "Sẽ tạo hình học thật trong Inventor 2018: " + str(path) + "\n" +
                 dims + "\nOperation: " + str(cmd.get("operation", "auto")) +
@@ -589,14 +600,16 @@ class MainWindow(QMainWindow):
             try:
                 if cmd["op"] == "create_rectangle_extrude":
                     result = create_rectangle_extrude(doc, self.inventor_app, cmd)
-                else:
+                elif cmd["op"] == "create_circle_extrude":
                     result = create_circle_extrude(doc, self.inventor_app, cmd)
+                else:
+                    result = create_profile_extrude(doc, self.inventor_app, cmd)
                 comp["parameters"] = copy.deepcopy(result["parameters"])
                 self.project["change_history"].append({
                     "timestamp": now(),
                     "component_id": cmd["component_id"],
                     "operation": cmd["op"],
-                    "dimensions_mm": result["dimensions_mm"],
+                    "dimensions_mm": result.get("dimensions_mm", {"plane": result.get("plane"), "distance": result.get("distance_mm"), "loop_count": result.get("loop_count")}),
                     "parameter_names": result["parameter_names"],
                     "backup_file": result["backup_path"],
                     "inventor_file": result["document_path"],
