@@ -30,6 +30,11 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Check Python syntax and imports
+        run: |
+          python -m compileall -q .
+          python -c "import main; import inventor_geometry; print('PDF2Inventor V0.5 import OK')"
+
       - name: Run Inventor bridge unit tests
         run: python -m unittest discover -s tests -v
 
