@@ -227,10 +227,31 @@ def analysis_schema() -> dict[str, Any]:
             "value": nullable_number,
             "unit": {"type": "string"},
             "view": {"type": "string"},
+            "page": {"type": "integer"},
             "evidence": {"type": "string"},
             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         },
-        "required": ["label", "value", "unit", "view", "evidence", "confidence"],
+        "required": ["label", "value", "unit", "view", "page", "evidence", "confidence"],
+        "additionalProperties": False,
+    }
+    scale_reference_schema = {
+        "type": "object",
+        "properties": {
+            "dimension_text": {"type": "string"},
+            "value_mm": {"type": "number"},
+            "measured_length_pt": {"type": "number"},
+            "mm_per_pt": {"type": "number"},
+            "page": {"type": "integer"},
+            "vector_path_id": {"type": "integer"},
+            "segment_index": {"type": "integer"},
+            "axis": {"type": "string", "enum": ["x", "y", "z"]},
+            "view": {"type": "string"},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        },
+        "required": [
+            "dimension_text", "value_mm", "measured_length_pt", "mm_per_pt",
+            "page", "vector_path_id", "segment_index", "axis", "view", "confidence"
+        ],
         "additionalProperties": False,
     }
     schema_properties = {
@@ -246,6 +267,8 @@ def analysis_schema() -> dict[str, Any]:
         "feature_summary": {"type": "array", "items": {"type": "string"}},
         "manufacturing_notes": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "scale_status": {"type": "string", "enum": ["verified", "unverified", "conflict"]},
+        "scale_references": {"type": "array", "items": scale_reference_schema},
         "cad_command": {"anyOf": [command_schema, {"type": "null"}]},
         "questions": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}},
