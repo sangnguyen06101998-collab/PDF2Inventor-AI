@@ -31,7 +31,7 @@ def default_project():
         "change_history": [],
         "notes": [
             "Chỉ đưa cho ChatGPT thông tin cần thiết; không gửi PDF nếu không cần.",
-            "V0.5 hỗ trợ cập nhật tham số và dựng Sketch chữ nhật + Extrude trên IPT đã liên kết; mọi lệnh phải được xác nhận trước khi áp dụng."
+            "V0.6 xử lý PDF vector cục bộ; mọi thay đổi hình học Inventor phải được xác nhận trước khi áp dụng."
         ]
     }
 
@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.build_command_tab(), "Nhập lệnh CAD")
         self.tabs = tabs
         self.refresh_project_view()
-        self.statusBar().showMessage("V0.5 PORTABLE · Inventor 2018 COM · FREE MODE")
+        self.statusBar().showMessage("V0.6 LOCAL · Không cần API · Inventor 2018 COM")
 
     def build_project_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         rl.addWidget(self.project_view)
         split.addWidget(left); split.addWidget(right); split.setSizes([350, 850])
         root.addWidget(split, 1)
-        note = QLabel("V0.5: cập nhật tham số và tạo Sketch chữ nhật + Extrude trên IPT đã liên kết sau khi người dùng xác nhận.")
+        note = QLabel("V0.6 Local: đọc vector PDF tại máy; dựng hình cơ bản trên IPT sau khi người dùng xác nhận.")
         note.setStyleSheet("color:#b45309;")
         root.addWidget(note)
         return w
@@ -168,7 +168,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("V0.5 hỗ trợ set_parameter, Sketch chữ nhật/tròn, Extrude và Extrude Cut. Chưa hỗ trợ Fillet, Chamfer hoặc IAM.")
+        warning = QLabel("V0.6 không dùng OpenAI API. Dựng hình hiện hỗ trợ set_parameter, Sketch chữ nhật/tròn, Extrude/Cut cơ bản; chưa tự động dựng mọi chi tiết phức tạp.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -453,7 +453,7 @@ class MainWindow(QMainWindow):
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "V0.5 chưa hỗ trợ native Hole, Fillet, Chamfer, Pattern hoặc xóa Feature; lỗ tròn đơn giản dùng create_circle_extrude với operation=cut."
+            "V0.6 chưa hỗ trợ native Hole, Fillet, Chamfer, Pattern hoặc xóa Feature; lỗ tròn đơn giản dùng create_circle_extrude với operation=cut."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
