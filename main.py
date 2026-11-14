@@ -517,8 +517,12 @@ class MainWindow(QMainWindow):
             issues = []
             commands = data.get("commands", [])
             geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern", "create_assembly_iam"}]
-            if geometry_commands and len(commands) != 1:
-                issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
+            if geometry_commands and len(geometry_commands) != len(commands):
+                issues.append("Không được trộn lệnh hình học với set_parameter trong cùng gói JSON.")
+            if geometry_commands and len({cmd.get("component_id") for cmd in geometry_commands}) != 1:
+                issues.append("Một chuỗi Feature chỉ được tác động lên một chi tiết IPT.")
+            if any(cmd.get("op") == "create_assembly_iam" for cmd in geometry_commands) and len(commands) != 1:
+                issues.append("Lệnh tạo IAM phải đứng riêng trong một gói JSON.")
             for i, cmd in enumerate(commands, 1):
                 if not isinstance(cmd, dict):
                     issues.append(f"Lệnh {i}: mỗi phần tử commands phải là một đối tượng JSON.")
@@ -633,7 +637,67 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Lỗi tạo IAM", str(e))
             return
 
-        # Geometry operations are intentionally a single-command transaction in V0.6.
+        geometry_ops = {
+            "create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude",
+            "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"
+        }
+        if len(targets) > 1 and all(cmd.get("op") in geometry_ops for _, cmd in targets):
+            comp = targets[0][0]
+            if any(item[0] is not comp for item in targets):
+                QMessageBox.warning(self, "Nhiều chi tiết", "Một chuỗi Feature chỉ được tác động lên một IPT.")
+                return
+            path = comp.get("inventor_file")
+            try:
+                if self.inventor_app is None: self.inventor_app = connect_inventor()
+                doc = get_document_by_path(self.inventor_app, path)
+                if doc is None: raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor.")
+            except Exception as e:
+                QMessageBox.warning(self, "Inventor", str(e)); return
+            plan_lines = [f'{i}. {cmd.get("op")} · {cmd.get("feature_name", cmd.get("feature_names", ""))}' for i, (_, cmd) in enumerate(targets, 1)]
+            if QMessageBox.question(
+                self, "Xác nhận chuỗi Feature",
+                "Sẽ chạy lần lượt các Feature sau trên cùng IPT. Mỗi bước tạo một file backup riêng.\\n"
+                + str(path) + "\\n\\n" + "\\n".join(plan_lines) + "\\n\\nTiếp tục?"
+            ) != QMessageBox.Yes:
+                return
+            applied = []
+            try:
+                for item_comp, cmd in targets:
+                    op = cmd["op"]
+                    if op == "create_rectangle_extrude":
+                        result = create_rectangle_extrude(doc, self.inventor_app, cmd)
+                    elif op == "create_circle_extrude":
+                        result = create_circle_extrude(doc, self.inventor_app, cmd)
+                    elif op == "create_profile_extrude":
+                        result = create_profile_extrude(doc, self.inventor_app, cmd)
+                    elif op in {"create_fillet", "create_chamfer"}:
+                        result = create_edge_finish(doc, self.inventor_app, cmd)
+                    else:
+                        result = create_pattern(doc, self.inventor_app, cmd)
+                    item_comp["parameters"] = copy.deepcopy(result.get("parameters", item_comp.get("parameters", {})))
+                    applied.append(result.get("backup_path", ""))
+                    self.project["change_history"].append({
+                        "timestamp": now(), "component_id": cmd["component_id"], "operation": op,
+                        "feature_name": result.get("feature_name"), "backup_file": result.get("backup_path"),
+                        "inventor_file": result.get("document_path"), "source": "ChatGPT manual",
+                        "applied_to_inventor": True, "reason": cmd.get("reason", "")
+                    })
+                self.refresh_project_view()
+                if self.project_path: save_json(self.project_path, self.project)
+                else: self.save_project()
+                self.command_result.append("\\nĐÃ ÁP DỤNG CHUỖI FEATURE: " + str(len(applied)) + " bước.\\nBackup:\\n" + "\\n".join(applied))
+                QMessageBox.information(self, "Hoàn tất", "Đã áp dụng " + str(len(applied)) + " Feature.\\nMỗi bước có backup riêng.")
+            except Exception as e:
+                self.refresh_project_view()
+                if self.project_path: save_json(self.project_path, self.project)
+                QMessageBox.critical(
+                    self, "Chuỗi Feature dừng giữa chừng",
+                    "Đã áp dụng " + str(len(applied)) + " bước trước khi lỗi. Không chạy tiếp để tránh sai mô hình.\\n"
+                    + str(e) + "\\nBackup các bước đã chạy:\\n" + "\\n".join(applied)
+                )
+            return
+
+        # Single geometry operation path.
         if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
