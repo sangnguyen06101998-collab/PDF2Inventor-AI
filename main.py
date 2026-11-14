@@ -14,6 +14,7 @@ from inventor_geometry import create_rectangle_extrude, validate_rectangle_comma
 from pdf_vector import analyze_pdf_vector, format_analysis_summary, save_analysis_report
 from inventor_advanced import create_profile_extrude, validate_advanced_profile
 from inventor_edge_features import create_edge_finish, validate_edge_finish
+from inventor_patterns import create_pattern, validate_pattern
 
 APP_TITLE = "PDF2Inventor Local Edition · V0.6"
 SCHEMA_VERSION = "0.2"
@@ -497,7 +498,7 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer"}]
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}]
             if geometry_commands and len(commands) != 1:
                 issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
             for i, cmd in enumerate(commands, 1):
@@ -545,6 +546,13 @@ class MainWindow(QMainWindow):
                         validate_edge_finish(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
+                elif op in {"create_circular_pattern", "create_rectangular_pattern"}:
+                    if not comp.get("inventor_file"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_pattern(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
                 else:
                     issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.6.")
             if not commands and not data.get("questions"):
@@ -575,7 +583,7 @@ class MainWindow(QMainWindow):
             targets.append((comp, cmd))
 
         # Geometry operations are intentionally a single-command transaction in V0.5.
-        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer"}:
+        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
             try:
@@ -598,10 +606,12 @@ class MainWindow(QMainWindow):
             elif cmd["op"] == "create_profile_extrude":
                 dims = (f'Biên dạng tùy chỉnh: {len(cmd["loops"])} vòng kín · Mặt phẳng: {cmd["plane"]} · '
                         f'Chiều đùn: {cmd["distance"]} mm · Operation: {cmd["operation"]}')
-            else:
+            elif cmd["op"] in {"create_fillet", "create_chamfer"}:
                 size_label = "Bán kính bo" if cmd["op"] == "create_fillet" else "Khoảng vát"
                 size_value = cmd.get("radius", cmd.get("distance"))
                 dims = f'{size_label}: {size_value} mm · Các cạnh 1-based: {cmd["edge_indices"]}'
+            else:
+                dims = f'Pattern: {cmd["op"]} · Feature: {cmd["feature_names"]} · Số lượng: {cmd["count"]} · Trục: WorkAxis {cmd["axis_index"]}'
             intro = (
                 "Sẽ tạo hình học thật trong Inventor 2018: " + str(path) + "\n" +
                 dims + "\nOperation: " + str(cmd.get("operation", "auto")) +
@@ -616,8 +626,10 @@ class MainWindow(QMainWindow):
                     result = create_circle_extrude(doc, self.inventor_app, cmd)
                 elif cmd["op"] == "create_profile_extrude":
                     result = create_profile_extrude(doc, self.inventor_app, cmd)
-                else:
+                elif cmd["op"] in {"create_fillet", "create_chamfer"}:
                     result = create_edge_finish(doc, self.inventor_app, cmd)
+                else:
+                    result = create_pattern(doc, self.inventor_app, cmd)
                 comp["parameters"] = copy.deepcopy(result["parameters"])
                 self.project["change_history"].append({
                     "timestamp": now(),
