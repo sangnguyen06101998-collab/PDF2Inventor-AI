@@ -9,8 +9,9 @@ class PatternValidationTests(unittest.TestCase):
         self.assertEqual(validate_pattern(c)["count"],6)
 
     def test_valid_rectangular_pattern(self):
-        c={"op":"create_rectangular_pattern","unit":"mm","feature_names":["Rib1"],"axis_index":1,"count":3,"spacing_mm":40}
+        c={"op":"create_rectangular_pattern","unit":"mm","feature_names":["Rib1"],"axis_index":1,"count":3,"spacing_mm":40,"count_y":2,"spacing_y_mm":25,"axis_y_index":2}
         self.assertEqual(validate_pattern(c)["count"],3)
+        self.assertEqual(validate_pattern(c)["count_y"],2)
 
     def test_rejects_pattern_count_one(self):
         c={"op":"create_circular_pattern","unit":"mm","feature_names":["Hole1"],"count":1}
