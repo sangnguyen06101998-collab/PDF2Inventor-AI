@@ -125,7 +125,7 @@ def create_profile_extrude(document, inventor_app, command):
         )
         feature = component.Features.ExtrudeFeatures.Add(definition)
         sketch.Visible = False
-        if sketch_plane is not base_plane:
+        if abs(cfg["offset_mm"]) > 1e-9:
             try: sketch_plane.Visible = False
             except Exception: pass
         sketch.Name = "P2I_Advanced_Profile_Sketch"
