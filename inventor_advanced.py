@@ -63,6 +63,7 @@ def validate_advanced_profile(command):
             normalized.append({"type": "circle", "center_x": cx, "center_y": cy, "radius": radius})
         else:
             raise InventorBridgeError("Loại loop chỉ nhận polyline hoặc circle.")
+    offset = _finite_number(command.get("offset_mm", 0), "offset_mm")
     distance = _finite_number(command.get("distance"), "distance")
     if distance <= 0:
         raise InventorBridgeError("distance phải lớn hơn 0.")
@@ -75,7 +76,7 @@ def validate_advanced_profile(command):
     direction = str(command.get("direction", "positive")).lower()
     if direction not in DIRECTION_IDS:
         raise InventorBridgeError("direction chỉ nhận positive hoặc negative.")
-    return {"plane": plane, "loops": normalized, "distance": distance,
+    return {"plane": plane, "offset_mm": offset, "loops": normalized, "distance": distance,
             "operation": operation, "direction": direction, "feature_name": feature_name, "unit": "mm"}
 
 
@@ -100,7 +101,9 @@ def create_profile_extrude(document, inventor_app, command):
             document, "PDF2Inventor Advanced Profile Extrude"
         )
         component = document.ComponentDefinition
-        sketch = component.Sketches.Add(component.WorkPlanes.Item(PLANE_IDS[cfg["plane"]]))
+        base_plane = component.WorkPlanes.Item(PLANE_IDS[cfg["plane"]])
+        sketch_plane = base_plane if abs(cfg["offset_mm"]) < 1e-9 else component.WorkPlanes.AddByPlaneAndOffset(base_plane, cfg["offset_mm"] / 10.0)
+        sketch = component.Sketches.Add(sketch_plane)
         geometry = inventor_app.TransientGeometry
         for loop in cfg["loops"]:
             if loop["type"] == "polyline":
@@ -122,6 +125,9 @@ def create_profile_extrude(document, inventor_app, command):
         )
         feature = component.Features.ExtrudeFeatures.Add(definition)
         sketch.Visible = False
+        if sketch_plane is not base_plane:
+            try: sketch_plane.Visible = False
+            except Exception: pass
         sketch.Name = "P2I_Advanced_Profile_Sketch"
         feature.Name = cfg["feature_name"]
         document.Update()
@@ -131,7 +137,7 @@ def create_profile_extrude(document, inventor_app, command):
         return {
             "document_path": file_path, "backup_path": str(backup),
             "sketch_name": str(sketch.Name), "feature_name": str(feature.Name),
-            "plane": cfg["plane"], "distance_mm": cfg["distance"],
+            "plane": cfg["plane"], "offset_mm": cfg["offset_mm"], "distance_mm": cfg["distance"],
             "operation": cfg["operation"], "loop_count": len(cfg["loops"]),
             "range_box": _range_box_mm(component), "parameters": read_parameters(document)
         }
