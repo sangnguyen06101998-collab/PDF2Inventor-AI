@@ -345,7 +345,12 @@ class MainWindow(QMainWindow):
         if self.ai_worker is not None and self.ai_worker.isRunning():
             QMessageBox.information(self, "Đang phân tích", "AI đang đọc bản vẽ này.")
             return
-        if not get_api_key():
+        try:
+            configured_api_key = get_api_key()
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi API Key", str(e))
+            return
+        if not configured_api_key:
             QMessageBox.warning(
                 self, "Thiếu API Key",
                 "Hãy nhập OpenAI API Key ở phía trên và nhấn Lưu cấu hình. "
