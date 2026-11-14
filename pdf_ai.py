@@ -566,6 +566,136 @@ def validate_command_dimensions(analysis: dict[str, Any], command: dict[str, Any
     return issues
 
 
+def _page_path(vector_report: dict[str, Any], page_number: int, path_id: int) -> dict[str, Any] | None:
+    page = next(
+        (item for item in vector_report.get("page_details", []) if item.get("page") == page_number),
+        None,
+    )
+    if page is None:
+        return None
+    return next(
+        (item for item in page.get("paths", []) if int(item.get("id", -1)) == int(path_id)),
+        None,
+    )
+
+
+def derive_profile_from_vectors(
+    vector_report: dict[str, Any],
+    page_number: int,
+    profile_path_id: int,
+    hole_path_ids: list[int],
+    mm_per_pt: float,
+) -> dict[str, Any]:
+    """Convert a closed CAD-exported vector outline and circles to exact mm coordinates."""
+    if not math.isfinite(mm_per_pt) or mm_per_pt <= 0:
+        raise PdfAIError("Tỷ lệ mm/point không hợp lệ.")
+
+    profile_path = _page_path(vector_report, page_number, profile_path_id)
+    if profile_path is None:
+        raise PdfAIError("Không tìm thấy vector đường bao ngoài được AI chọn.")
+    if not profile_path.get("closed"):
+        raise PdfAIError("Đường bao vector ngoài không được đóng kín.")
+    raw_segments = profile_path.get("segments") or []
+    points_pt: list[tuple[float, float]] = []
+
+    # A single PDF rectangle operator is exact and can be expanded to four corners.
+    if len(raw_segments) == 1 and raw_segments[0][0] == "R":
+        _, x0, y0, x1, y1, *_ = raw_segments[0]
+        points_pt = [
+            (float(x0), float(y0)),
+            (float(x1), float(y0)),
+            (float(x1), float(y1)),
+            (float(x0), float(y1)),
+        ]
+    else:
+        for segment in raw_segments:
+            if not isinstance(segment, list) or len(segment) != 5 or segment[0] != "L":
+                raise PdfAIError(
+                    "Đường bao ngoài có cung cong/đoạn không thẳng. V0.6 hiện chỉ dựng đường bao bằng đoạn thẳng vector."
+                )
+        if len(raw_segments) < 3:
+            raise PdfAIError("Đường bao vector có ít hơn 3 cạnh.")
+        points_pt = [
+            (float(raw_segments[0][1]), float(raw_segments[0][2]))
+        ]
+        previous_end = points_pt[0]
+        for index, segment in enumerate(raw_segments):
+            start = (float(segment[1]), float(segment[2]))
+            end = (float(segment[3]), float(segment[4]))
+            if math.dist(previous_end, start) > 0.05:
+                raise PdfAIError(
+                    f"Đường bao vector không liên tục tại cạnh {index + 1}; không thể tự nối đoán."
+                )
+            if index < len(raw_segments) - 1:
+                points_pt.append(end)
+            previous_end = end
+        if math.dist(previous_end, points_pt[0]) > 0.05:
+            raise PdfAIError("Các đoạn vector không tạo thành một vòng kín.")
+
+    # Remove duplicate consecutive/closing vertices and collinear intermediate points.
+    cleaned: list[tuple[float, float]] = []
+    for point in points_pt:
+        if not cleaned or math.dist(cleaned[-1], point) > 0.05:
+            cleaned.append(point)
+    if len(cleaned) > 2 and math.dist(cleaned[0], cleaned[-1]) <= 0.05:
+        cleaned.pop()
+
+    changed = True
+    while changed and len(cleaned) > 3:
+        changed = False
+        for index in range(len(cleaned)):
+            a = cleaned[index - 1]
+            b = cleaned[index]
+            d = cleaned[(index + 1) % len(cleaned)]
+            cross = abs((b[0] - a[0]) * (d[1] - b[1]) - (b[1] - a[1]) * (d[0] - b[0]))
+            baseline = max(math.dist(a, b), math.dist(b, d), 1.0)
+            if cross <= baseline * 0.001:
+                cleaned.pop(index)
+                changed = True
+                break
+
+    if len(cleaned) < 3:
+        raise PdfAIError("Đường bao vector chỉ còn dưới 3 điểm sau khi loại bỏ điểm trùng.")
+
+    min_x = min(point[0] for point in cleaned)
+    max_y = max(point[1] for point in cleaned)
+    points_mm = [
+        {
+            "x": round((point[0] - min_x) * mm_per_pt, 4),
+            "y": round((max_y - point[1]) * mm_per_pt, 4),
+        }
+        for point in cleaned
+    ]
+
+    holes = []
+    for index, hole_path_id in enumerate(hole_path_ids or [], 1):
+        hole_path = _page_path(vector_report, page_number, int(hole_path_id))
+        if hole_path is None:
+            raise PdfAIError(f"Không tìm thấy vector lỗ tròn số {index}.")
+        if not hole_path.get("closed") or not hole_path.get("has_circle_or_arc_candidate"):
+            raise PdfAIError(
+                f"Vector lỗ số {index} không được nhận dạng chắc chắn là đường tròn/đường cung kín."
+            )
+        bbox = hole_path.get("bbox_pt")
+        if not bbox or len(bbox) != 4:
+            raise PdfAIError(f"Không đọc được khung bao vector lỗ số {index}.")
+        hx0, hy0, hx1, hy1 = [float(value) for value in bbox]
+        width_pt, height_pt = hx1 - hx0, hy1 - hy0
+        if width_pt <= 0 or height_pt <= 0:
+            raise PdfAIError(f"Kích thước vector lỗ số {index} không hợp lệ.")
+        ratio_error = abs(width_pt - height_pt) / max(width_pt, height_pt)
+        if ratio_error > 0.02:
+            raise PdfAIError(f"Vector lỗ số {index} không đủ tròn (sai khác đường kính {ratio_error*100:.2f}%).")
+        center_x_pt, center_y_pt = (hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0
+        holes.append({
+            "center_x": round((center_x_pt - min_x) * mm_per_pt, 4),
+            "center_y": round((max_y - center_y_pt) * mm_per_pt, 4),
+            "diameter": round(((width_pt + height_pt) / 2.0) * mm_per_pt, 4),
+        })
+
+    return {"points": points_mm, "holes": holes}
+
+
 def analyze_pdf(
     pdf_path: str,
     api_key: str,
