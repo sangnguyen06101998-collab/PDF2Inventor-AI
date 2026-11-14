@@ -19,7 +19,7 @@ if %errorlevel%==0 (
 if errorlevel 1 goto fail
 %PY% -m pip install -r requirements.txt pyinstaller
 if errorlevel 1 goto fail
-%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --name PDF2Inventor_AI --collect-all PySide6 --collect-all fitz main.py
+%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --name PDF2Inventor_AI --collect-all PySide6 --collect-all fitz --hidden-import win32com --hidden-import win32com.client --hidden-import pythoncom --hidden-import pywintypes main.py
 if errorlevel 1 goto fail
 echo.
 echo BUILD THANH CONG: dist\PDF2Inventor_AI.exe
