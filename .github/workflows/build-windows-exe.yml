@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - feature/v0.4-inventor-com
+      - feature/v0.5-sketch-extrude
 
 permissions:
   contents: read
