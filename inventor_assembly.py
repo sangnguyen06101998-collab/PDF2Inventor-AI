@@ -47,7 +47,8 @@ def create_assembly_iam(inventor_app, command):
         raise InventorBridgeError("File IAM đích đã tồn tại; hãy chọn tên file mới để không ghi đè.")
     assembly = None
     try:
-        assembly = inventor_app.Documents.Add(12291, "", True)
+        template_path = inventor_app.FileManager.GetTemplateFile(12291)
+        assembly = inventor_app.Documents.Add(12291, template_path, True)
         definition = assembly.ComponentDefinition
         geometry = inventor_app.TransientGeometry
         for item in cfg["components"]:
