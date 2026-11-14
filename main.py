@@ -2,21 +2,68 @@ import sys, json, os, copy
 from pathlib import Path
 from datetime import datetime
 import fitz
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
     QLabel, QListWidget, QTextEdit, QFileDialog, QMessageBox, QSplitter,
-    QGroupBox, QLineEdit, QTabWidget, QInputDialog, QDialog
+    QGroupBox, QLineEdit, QTabWidget, QInputDialog, QDialog, QComboBox
 )
 from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
 from inventor_geometry import create_rectangle_extrude, validate_rectangle_command, create_circle_extrude, validate_circle_command
+from pdf_ai import (
+    PdfAIError, analyze_pdf, build_command_document, format_analysis_report,
+    get_api_key, load_settings, save_settings, DEFAULT_MODEL
+)
 
-APP_TITLE = "PDF2Inventor AI · V0.5 Sketch + Extrude"
+APP_TITLE = "PDF2Inventor AI · V0.6 PDF Vision + Inventor COM"
 SCHEMA_VERSION = "0.2"
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
+
+class PdfPreviewLabel(QLabel):
+    fileDropped = Signal(str)
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if any(url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf") for url in urls):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        for url in urls:
+            if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf"):
+                self.fileDropped.emit(url.toLocalFile())
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+
+class PdfAnalysisWorker(QThread):
+    analysis_ready = Signal(object)
+    analysis_failed = Signal(str)
+
+    def __init__(self, args, parent=None):
+        super().__init__(parent)
+        self.args = args
+
+    def run(self):
+        try:
+            api_key = get_api_key()
+            if not api_key:
+                raise PdfAIError("Chưa có OpenAI API Key. Hãy nhập khóa trong tab AI đọc bản vẽ.")
+            result = analyze_pdf(api_key=api_key, **self.args)
+            self.analysis_ready.emit(result)
+        except Exception as exc:
+            self.analysis_failed.emit(str(exc))
+
 
 def default_project():
     return {
@@ -52,17 +99,22 @@ class MainWindow(QMainWindow):
         self.page_index = 0
         self.pending_commands = None
         self.inventor_app = None
+        self.ai_worker = None
+        self.ai_analysis = None
 
+        self.setAcceptDrops(True)
         tabs = QTabWidget()
         self.setCentralWidget(tabs)
         tabs.addTab(self.build_project_tab(), "Dự án CAD")
         tabs.addTab(self.build_pdf_tab(), "PDF")
+        self.ai_tab = self.build_ai_tab()
+        tabs.addTab(self.ai_tab, "AI đọc bản vẽ")
         tabs.addTab(self.build_inventor_tab(), "Inventor 2018")
         tabs.addTab(self.build_chat_tab(), "ChatGPT thủ công")
         tabs.addTab(self.build_command_tab(), "Nhập lệnh CAD")
         self.tabs = tabs
         self.refresh_project_view()
-        self.statusBar().showMessage("V0.5 PORTABLE · Inventor 2018 COM · FREE MODE")
+        self.statusBar().showMessage("V0.6 · PDF Vision AI · Inventor 2018 COM")
 
     def build_project_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
