@@ -1,6 +1,11 @@
 import tempfile
 import unittest
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
+
+import inventor_bridge
 
 from inventor_bridge import (
     InventorBridgeError,
@@ -58,7 +63,73 @@ class FakeDocument:
             raise RuntimeError("simulated update failure")
 
 
+class FakeRawDispatch:
+    def QueryInterface(self, _iid):
+        return SimpleNamespace(SoftwareVersion=SimpleNamespace(DisplayVersion="2018"))
+
+
+class FakePythonCom:
+    IID_IDispatch = object()
+
+    def __init__(self, fail_active=False):
+        self.initialized = 0
+        self.fail_active = fail_active
+
+    def CoInitialize(self):
+        self.initialized += 1
+
+    def CLSIDFromProgID(self, progid):
+        if progid != "Inventor.Application":
+            raise ValueError(progid)
+        return "{FAKE-INVENTOR-CLSID}"
+
+    def GetActiveObject(self, clsid):
+        if self.fail_active:
+            error = RuntimeError("Operation unavailable")
+            error.hresult = -2147221021
+            raise error
+        if clsid != "{FAKE-INVENTOR-CLSID}":
+            raise ValueError(clsid)
+        return FakeRawDispatch()
+
+
 class InventorBridgeTests(unittest.TestCase):
+    def test_connect_initializes_com_and_attaches_to_running_inventor(self):
+        fake_pythoncom = FakePythonCom()
+        client_module = ModuleType("win32com.client")
+        client_module.Dispatch = lambda dispatch: dispatch.QueryInterface(None)
+        win32com_module = ModuleType("win32com")
+        win32com_module.client = client_module
+
+        with patch.dict(sys.modules, {
+            "pythoncom": fake_pythoncom,
+            "win32com": win32com_module,
+            "win32com.client": client_module,
+        }):
+            inventor_bridge._COM_INITIALIZED = False
+            app = inventor_bridge.connect_inventor()
+
+        self.assertEqual(fake_pythoncom.initialized, 1)
+        self.assertEqual(app.SoftwareVersion.DisplayVersion, "2018")
+
+    def test_connect_error_includes_hresult_diagnostic(self):
+        fake_pythoncom = FakePythonCom(fail_active=True)
+        client_module = ModuleType("win32com.client")
+        win32com_module = ModuleType("win32com")
+        win32com_module.client = client_module
+
+        with patch.dict(sys.modules, {
+            "pythoncom": fake_pythoncom,
+            "win32com": win32com_module,
+            "win32com.client": client_module,
+        }):
+            inventor_bridge._COM_INITIALIZED = False
+            with self.assertRaises(InventorBridgeError) as context:
+                inventor_bridge.connect_inventor()
+
+        self.assertIn("0x800401E3", str(context.exception))
+        self.assertIn("cùng mức quyền", str(context.exception))
+
     def test_parse_expression_with_length_unit(self):
         parsed = _parse_expression("150 mm")
         self.assertEqual(parsed["value"], 150)
