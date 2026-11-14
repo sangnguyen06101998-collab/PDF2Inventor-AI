@@ -54,6 +54,41 @@ def validate_advanced_profile(command):
             if abs(area2) < 1e-8:
                 raise InventorBridgeError(f"Biên dạng {li} có diện tích bằng 0.")
             normalized.append({"type": "polyline", "points": pts})
+        elif kind == "segments":
+            segments = loop.get("segments")
+            if not isinstance(segments, list) or len(segments) < 2:
+                raise InventorBridgeError(f"Biên dạng segment {li} cần ít nhất 2 đoạn.")
+            clean_segments = []
+            endpoints = []
+            for si, segment in enumerate(segments, 1):
+                if not isinstance(segment, dict) or segment.get("type") not in {"line", "arc"}:
+                    raise InventorBridgeError(f"Đoạn {si} của biên dạng {li} phải là line hoặc arc.")
+                start = segment.get("start")
+                end = segment.get("end")
+                if not isinstance(start, (list, tuple)) or len(start) != 2 or not isinstance(end, (list, tuple)) or len(end) != 2:
+                    raise InventorBridgeError(f"Đoạn {si} cần start/end dạng [x,y].")
+                start = [_finite_number(start[0], "start.x"), _finite_number(start[1], "start.y")]
+                end = [_finite_number(end[0], "end.x"), _finite_number(end[1], "end.y")]
+                if math.dist(start, end) < 1e-8:
+                    raise InventorBridgeError(f"Đoạn {si} có chiều dài bằng 0.")
+                item = {"type": segment["type"], "start": start, "end": end}
+                if segment["type"] == "arc":
+                    center = segment.get("center")
+                    if not isinstance(center, (list, tuple)) or len(center) != 2:
+                        raise InventorBridgeError(f"Cung {si} cần center=[x,y].")
+                    center = [_finite_number(center[0], "center.x"), _finite_number(center[1], "center.y")]
+                    r1, r2 = math.dist(center, start), math.dist(center, end)
+                    if r1 <= 1e-8 or abs(r1-r2) > max(0.01, r1*1e-4):
+                        raise InventorBridgeError(f"Cung {si} có bán kính không hợp lệ hoặc start/end không đồng bán kính.")
+                    item["center"] = center
+                    item["counterclockwise"] = bool(segment.get("counterclockwise", True))
+                clean_segments.append(item)
+                endpoints.append((start, end))
+            for si, (_, end) in enumerate(endpoints):
+                next_start = endpoints[(si+1) % len(endpoints)][0]
+                if math.dist(end, next_start) > 0.01:
+                    raise InventorBridgeError(f"Biên dạng segment {li} không khép kín tại đoạn {si+1}.")
+            normalized.append({"type": "segments", "segments": clean_segments})
         elif kind == "circle":
             cx = _finite_number(loop.get("center_x"), "center_x")
             cy = _finite_number(loop.get("center_y"), "center_y")
@@ -113,6 +148,15 @@ def create_profile_extrude(document, inventor_app, command):
                     a = geometry.CreatePoint2d(p[0] / 10.0, p[1] / 10.0)
                     b = geometry.CreatePoint2d(q[0] / 10.0, q[1] / 10.0)
                     sketch.SketchLines.AddByTwoPoints(a, b)
+            elif loop["type"] == "segments":
+                for segment in loop["segments"]:
+                    start = geometry.CreatePoint2d(segment["start"][0]/10.0, segment["start"][1]/10.0)
+                    end = geometry.CreatePoint2d(segment["end"][0]/10.0, segment["end"][1]/10.0)
+                    if segment["type"] == "line":
+                        sketch.SketchLines.AddByTwoPoints(start, end)
+                    else:
+                        center = geometry.CreatePoint2d(segment["center"][0]/10.0, segment["center"][1]/10.0)
+                        sketch.SketchArcs.AddByCenterStartEndPoint(center, start, end, segment["counterclockwise"])
             else:
                 center = geometry.CreatePoint2d(loop["center_x"] / 10.0, loop["center_y"] / 10.0)
                 sketch.SketchCircles.AddByCenterRadius(center, loop["radius"] / 10.0)
