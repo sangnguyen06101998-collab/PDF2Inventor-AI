@@ -17,6 +17,7 @@ from inventor_edge_features import create_edge_finish, validate_edge_finish
 from inventor_patterns import create_pattern, validate_pattern
 from inventor_assembly import create_assembly_iam, validate_assembly_command
 from inventor_holes import create_hole, validate_hole_command
+from inventor_threads import create_thread, validate_thread
 
 APP_TITLE = "PDF2Inventor Local Edition · V0.6"
 SCHEMA_VERSION = "0.2"
@@ -467,6 +468,7 @@ class MainWindow(QMainWindow):
             "Với create_circle_extrude, tạo Sketch tròn có đường kính điều khiển và Extrude/Cut; bắt buộc có diameter, thickness và unit=mm. "
             "Với create_profile_extrude, tạo profile tùy chỉnh gồm loops polyline/circle trên plane XY/XZ/YZ rồi Extrude/Cut; mọi tọa độ và distance phải lấy từ bản vẽ, unit=mm. "
             "Với create_hole, dùng native HoleFeature với centers [[x,y],...], diameter, plane, offset_mm, extent through_all hoặc distance, depth_mm nếu là lỗ mù, direction và unit=mm. "
+            "Với create_thread, chỉ tạo ren trên mặt trụ đã có, dùng face_index và start_edge_index được xác minh, designation và thread_type đúng bảng ren Inventor; không tự suy ra M size từ đường kính nếu chưa rõ. "
             "Với create_fillet/create_chamfer, chỉ dùng edge_indices 1-based đã được xác minh trên đúng phiên bản IPT hiện tại; không đoán số cạnh. "
             "Với create_circular_pattern/create_rectangular_pattern, chỉ dùng feature_names và axis_index có thật trong IPT; rectangular pattern hiện một hướng. "
             "Với create_assembly_iam, chỉ tạo IAM từ các IPT tồn tại, output_path mới và position_mm XYZ đã được xác định; không tự đoán ràng buộc lắp ghép. "
@@ -476,7 +478,7 @@ class MainWindow(QMainWindow):
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "V0.6 hỗ trợ profile tùy chỉnh trên XY/XZ/YZ, native Hole, Extrude/Cut, Fillet/Chamfer theo cạnh, Circular/Rectangular Pattern một trục và tạo IAM từ IPT có sẵn. Không tự đoán cạnh, trục, feature name, kích thước hay ràng buộc lắp ráp."
+            "V0.6 hỗ trợ profile tùy chỉnh trên XY/XZ/YZ, native Hole, ren tiêu chuẩn trên mặt trụ, Extrude/Cut, Fillet/Chamfer theo cạnh, Circular/Rectangular Pattern một trục và tạo IAM từ IPT có sẵn. Không tự đoán cạnh, trục, feature name, kích thước hay ràng buộc lắp ráp."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
@@ -518,7 +520,7 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern", "create_assembly_iam"}]
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole", "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern", "create_assembly_iam"}]
             if geometry_commands and len(geometry_commands) != len(commands):
                 issues.append("Không được trộn lệnh hình học với set_parameter trong cùng gói JSON.")
             if geometry_commands and len({cmd.get("component_id") for cmd in geometry_commands}) != 1:
@@ -568,6 +570,13 @@ class MainWindow(QMainWindow):
                         issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
                     try:
                         validate_hole_command(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_thread":
+                    if not comp.get("inventor_file"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_thread(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
                 elif op in {"create_fillet", "create_chamfer"}:
@@ -681,6 +690,8 @@ class MainWindow(QMainWindow):
                         result = create_profile_extrude(doc, self.inventor_app, cmd)
                     elif op == "create_hole":
                         result = create_hole(doc, self.inventor_app, cmd)
+                    elif op == "create_thread":
+                        result = create_thread(doc, self.inventor_app, cmd)
                     elif op in {"create_fillet", "create_chamfer"}:
                         result = create_edge_finish(doc, self.inventor_app, cmd)
                     else:
@@ -709,7 +720,7 @@ class MainWindow(QMainWindow):
             return
 
         # Single geometry operation path.
-        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}:
+        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole", "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
             try:
@@ -734,6 +745,8 @@ class MainWindow(QMainWindow):
                         f'Chiều đùn: {cmd["distance"]} mm · Operation: {cmd["operation"]}')
             elif cmd["op"] == "create_hole":
                 dims = f'Hole native: Ø{cmd["diameter"]} mm · {len(cmd["centers"])} vị trí · {cmd["extent"]} · mặt phẳng {cmd["plane"]} offset {cmd.get("offset_mm",0)} mm'
+            elif cmd["op"] == "create_thread":
+                dims = f'Ren: {cmd["designation"]} · Face {cmd["face_index"]} · Edge {cmd["start_edge_index"]} · Hết ren: {cmd.get("full_depth", True)}'
             elif cmd["op"] in {"create_fillet", "create_chamfer"}:
                 size_label = "Bán kính bo" if cmd["op"] == "create_fillet" else "Khoảng vát"
                 size_value = cmd.get("radius", cmd.get("distance"))
@@ -756,6 +769,8 @@ class MainWindow(QMainWindow):
                     result = create_profile_extrude(doc, self.inventor_app, cmd)
                 elif cmd["op"] == "create_hole":
                     result = create_hole(doc, self.inventor_app, cmd)
+                elif cmd["op"] == "create_thread":
+                    result = create_thread(doc, self.inventor_app, cmd)
                 elif cmd["op"] in {"create_fillet", "create_chamfer"}:
                     result = create_edge_finish(doc, self.inventor_app, cmd)
                 else:
