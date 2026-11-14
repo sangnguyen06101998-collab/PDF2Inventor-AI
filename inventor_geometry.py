@@ -744,7 +744,8 @@ def create_profile_extrude(document, inventor_app, command):
                 sketch_points[index],
                 sketch_points[(index + 1) % len(sketch_points)],
             )
-        sketch.GeometricConstraints.AddGround(sketch_points[0])
+        for sketch_point in sketch_points:
+            sketch.GeometricConstraints.AddGround(sketch_point)
 
         hole_parameter_names = []
         for index, hole in enumerate(cfg["holes"], 1):
@@ -774,6 +775,21 @@ def create_profile_extrude(document, inventor_app, command):
             )
             diameter_dimension.Parameter.Expression = actual
             hole_parameter_names.append(actual)
+
+        for cutout_index, cutout in enumerate(cfg["cutouts"], 1):
+            cutout_points = [
+                sketch.SketchPoints.Add(
+                    geometry.CreatePoint2d(point[0] / 10.0, point[1] / 10.0), False
+                )
+                for point in cutout
+            ]
+            for point_index in range(len(cutout_points)):
+                sketch.SketchLines.AddByTwoPoints(
+                    cutout_points[point_index],
+                    cutout_points[(point_index + 1) % len(cutout_points)],
+                )
+            for sketch_point in cutout_points:
+                sketch.GeometricConstraints.AddGround(sketch_point)
 
         profile = sketch.Profiles.AddForSolid()
         direction_enum = (
@@ -812,6 +828,10 @@ def create_profile_extrude(document, inventor_app, command):
                     {"x": point[0], "y": point[1]} for point in cfg["points"]
                 ],
                 "holes": cfg["holes"],
+                "cutouts": [
+                    [{"x": point[0], "y": point[1]} for point in cutout]
+                    for cutout in cfg["cutouts"]
+                ],
             },
             "parameter_names": {
                 "thickness": thickness_name,
