@@ -470,7 +470,7 @@ class MainWindow(QMainWindow):
             "Với create_assembly_iam, chỉ tạo IAM từ các IPT tồn tại, output_path mới và position_mm XYZ đã được xác định; không tự đoán ràng buộc lắp ghép. "
             "center_x và center_y là tọa độ tâm hình tròn, mặc định 0 mm nếu người dùng không chỉ định. "
             "operation chỉ được dùng auto, join, new_body hoặc cut; direction chỉ được dùng positive hoặc negative. "
-            "Mỗi gói JSON chỉ chứa set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh hình học/edge/pattern/assembly. Không trộn các thao tác. "
+            "Có thể gửi nhiều lệnh hình học theo thứ tự trong cùng một gói nếu tất cả cùng component_id và cùng IPT; mỗi bước có backup riêng, nếu lỗi thì dừng chuỗi. Không trộn set_parameter vào chuỗi hình học. Lệnh IAM phải đứng riêng. "
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
@@ -751,7 +751,7 @@ class MainWindow(QMainWindow):
                     "component_id": cmd["component_id"],
                     "operation": cmd["op"],
                     "dimensions_mm": result.get("dimensions_mm", {"plane": result.get("plane"), "distance": result.get("distance_mm"), "loop_count": result.get("loop_count")}),
-                    "parameter_names": result["parameter_names"],
+                    "parameter_names": result.get("parameter_names", {}),
                     "backup_file": result["backup_path"],
                     "inventor_file": result["document_path"],
                     "source": "ChatGPT manual",
@@ -762,7 +762,7 @@ class MainWindow(QMainWindow):
                     "ĐÃ TẠO SKETCH + FEATURE TRONG INVENTOR\n"
                     + "FILE: " + result["document_path"] + "\n"
                     + "BACKUP: " + result["backup_path"] + "\n"
-                    + "THAM SỐ: " + json.dumps(result["parameter_names"], ensure_ascii=False)
+                    + "THAM SỐ: " + json.dumps(result.get("parameter_names", {}), ensure_ascii=False)
                 )
                 self.refresh_project_view()
                 if self.project_path: save_json(self.project_path, self.project)
