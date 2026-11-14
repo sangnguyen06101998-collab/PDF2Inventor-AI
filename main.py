@@ -379,20 +379,34 @@ class MainWindow(QMainWindow):
                 "operation": "auto",
                 "direction": "positive",
                 "reason": "Tạo khối chữ nhật kiểm thử"
+            },
+            "circle_command_schema": {
+                "op": "create_circle_extrude",
+                "component_id": "MÃ_CHI_TIẾT_CÓ_IPT_ĐÃ_GẮN",
+                "diameter": 20,
+                "thickness": 8,
+                "center_x": 0,
+                "center_y": 0,
+                "unit": "mm",
+                "operation": "cut",
+                "direction": "positive",
+                "reason": "Tạo lỗ tròn bằng Extrude Cut"
             }
         }
         instruction = (
             "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor AI V0.5, Autodesk Inventor 2018. "
             "Đọc hồ sơ JSON bên dưới và yêu cầu của người dùng. "
             "Với set_parameter, chỉ dùng component_id và parameter có sẵn trong hồ sơ. "
-            "Với create_rectangle_extrude, tạo một Sketch chữ nhật trên mặt phẳng XY và Extrude; bắt buộc có length, width, thickness và unit=mm. "
-            "origin_x và origin_y tính từ gốc tọa độ, mặc định 0 mm nếu người dùng không chỉ định. "
-            "operation chỉ được dùng auto, join hoặc new_body; direction chỉ được dùng positive hoặc negative. "
-            "Mỗi gói JSON chỉ dùng một chế độ: set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh create_rectangle_extrude. Không trộn hai loại lệnh. "
+            "Với create_rectangle_extrude, tạo Sketch chữ nhật trên mặt phẳng XY và Extrude/Cut; bắt buộc có length, width, thickness và unit=mm. "
+            "origin_x và origin_y là tọa độ góc đầu tiên từ gốc XY, mặc định 0 mm nếu người dùng không chỉ định. "
+            "Với create_circle_extrude, tạo Sketch tròn có đường kính điều khiển và Extrude/Cut; bắt buộc có diameter, thickness và unit=mm. "
+            "center_x và center_y là tọa độ tâm hình tròn, mặc định 0 mm nếu người dùng không chỉ định. "
+            "operation chỉ được dùng auto, join, new_body hoặc cut; direction chỉ được dùng positive hoặc negative. "
+            "Mỗi gói JSON chỉ dùng một chế độ: set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh create_rectangle_extrude/create_circle_extrude. Không trộn hai loại lệnh. "
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "Không tạo Hole, Fillet, Chamfer, Cut hoặc xóa Feature trong V0.5."
+            "V0.5 chưa hỗ trợ native Hole, Fillet, Chamfer, Pattern hoặc xóa Feature; lỗ tròn đơn giản dùng create_circle_extrude với operation=cut."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
