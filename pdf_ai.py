@@ -8,7 +8,9 @@ from __future__ import annotations
 import base64
 import ctypes
 import json
+import math
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -346,6 +348,219 @@ def _extract_output_text(response: dict[str, Any]) -> str:
     status = response.get("status")
     details = response.get("incomplete_details")
     raise PdfAIError(f"AI không trả nội dung phân tích hoàn chỉnh (status={status}, details={details}).")
+
+
+def _numeric_token(value: Any) -> float | None:
+    if value is None:
+        return None
+    match = re.search(r"(?<!\d)(\d+(?:[.,]\d+)?)(?!\d)", str(value).replace(",", "."))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _line_segment_length(page_record: dict[str, Any], path_id: int, segment_index: int) -> tuple[float | None, list[float] | None]:
+    path_record = next(
+        (item for item in page_record.get("paths", []) if int(item.get("id", -1)) == int(path_id)),
+        None,
+    )
+    if path_record is None:
+        return None, None
+    segments = path_record.get("segments", [])
+    if segment_index < 0 or segment_index >= len(segments):
+        return None, None
+    segment = segments[segment_index]
+    if not isinstance(segment, list) or len(segment) != 5 or segment[0] != "L":
+        return None, None
+    x1, y1, x2, y2 = [float(item) for item in segment[1:]]
+    return math.hypot(x2 - x1, y2 - y1), [x1, y1, x2, y2]
+
+
+def verify_scale_references(
+    vector_report: dict[str, Any] | None,
+    analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Recompute claimed mm/pt from real PDF line segments; never trust model math."""
+    result = {
+        "verified": False,
+        "reason": "",
+        "references_checked": [],
+        "mm_per_pt": None,
+        "geometry_view": str(analysis.get("geometry_view") or ""),
+        "geometry_page": analysis.get("geometry_page"),
+    }
+    if not vector_report or not vector_report.get("native_vector_pdf"):
+        result["reason"] = "PDF không có đường vector CAD đủ để hiệu chuẩn."
+        return result
+
+    view = str(analysis.get("geometry_view") or "").strip()
+    page_number = analysis.get("geometry_page")
+    if not view or not isinstance(page_number, int) or page_number < 1:
+        result["reason"] = "Thiếu hình chiếu chính hoặc số trang dùng để hiệu chuẩn."
+        return result
+
+    page_record = next(
+        (page for page in vector_report.get("page_details", []) if page.get("page") == page_number),
+        None,
+    )
+    if page_record is None:
+        result["reason"] = "Không có dữ liệu vector chi tiết cho trang hình chiếu chính."
+        return result
+
+    references = analysis.get("scale_references") or []
+    ratios = {"x": [], "y": []}
+    checked = []
+    issues = []
+    for index, reference in enumerate(references, 1):
+        if not isinstance(reference, dict):
+            issues.append(f"Chuẩn đo {index} không phải đối tượng.")
+            continue
+        reference_view = str(reference.get("view") or "").strip()
+        if reference_view.casefold() != view.casefold() or reference.get("page") != page_number:
+            continue
+        if reference.get("axis") not in {"x", "y"}:
+            continue
+        if reference.get("confidence") != "high":
+            issues.append(f"Chuẩn đo {index} không có độ tin cậy cao.")
+            continue
+        try:
+            path_id = int(reference.get("vector_path_id"))
+            segment_index = int(reference.get("segment_index"))
+            declared_value = float(reference.get("value_mm"))
+            claimed_length = float(reference.get("measured_length_pt"))
+            claimed_ratio = float(reference.get("mm_per_pt"))
+        except (TypeError, ValueError):
+            issues.append(f"Chuẩn đo {index} có trường số không hợp lệ.")
+            continue
+
+        actual_length, endpoints = _line_segment_length(page_record, path_id, segment_index)
+        if actual_length is None or endpoints is None or actual_length <= 1e-6:
+            issues.append(f"Chuẩn đo {index} không tham chiếu tới đoạn thẳng vector hợp lệ.")
+            continue
+        actual_text_value = _numeric_token(reference.get("dimension_text"))
+        if actual_text_value is None or abs(actual_text_value - declared_value) > max(0.05, declared_value * 0.0005):
+            issues.append(f"Chuẩn đo {index}: số ghi trên chú thích không khớp giá trị mm đã khai báo.")
+            continue
+        if abs(claimed_length - actual_length) > max(0.1, actual_length * 0.02):
+            issues.append(f"Chuẩn đo {index}: chiều dài đoạn vector AI khai báo không khớp dữ liệu PDF.")
+            continue
+
+        x1, y1, x2, y2 = endpoints
+        dx, dy = abs(x2 - x1), abs(y2 - y1)
+        axis = reference["axis"]
+        if axis == "x" and dy > max(0.1, dx * 0.03):
+            issues.append(f"Chuẩn đo {index}: đoạn vector không song song trục X.")
+            continue
+        if axis == "y" and dx > max(0.1, dy * 0.03):
+            issues.append(f"Chuẩn đo {index}: đoạn vector không song song trục Y.")
+            continue
+
+        actual_ratio = declared_value / actual_length
+        if claimed_ratio <= 0 or abs(claimed_ratio - actual_ratio) > actual_ratio * 0.02:
+            issues.append(f"Chuẩn đo {index}: tỷ lệ mm/pt AI tính không khớp chiều dài thật.")
+            continue
+        ratios[axis].append(actual_ratio)
+        checked.append({
+            "axis": axis,
+            "page": page_number,
+            "view": view,
+            "dimension_text": str(reference.get("dimension_text")),
+            "value_mm": declared_value,
+            "actual_length_pt": round(actual_length, 5),
+            "calculated_mm_per_pt": round(actual_ratio, 8),
+            "vector_path_id": path_id,
+            "segment_index": segment_index,
+        })
+
+    result["references_checked"] = checked
+    if issues:
+        result["reason"] = " ".join(issues)
+        return result
+    if not ratios["x"] or not ratios["y"]:
+        result["reason"] = "Cần ít nhất một chuẩn vector theo trục X và một chuẩn theo trục Y trên cùng hình chiếu."
+        return result
+
+    all_ratios = ratios["x"] + ratios["y"]
+    mean_ratio = sum(all_ratios) / len(all_ratios)
+    spread = (max(all_ratios) - min(all_ratios)) / mean_ratio if mean_ratio else 1.0
+    if spread > 0.02:
+        result["reason"] = f"Tỷ lệ X/Y sai khác {spread * 100:.2f}%, vượt ngưỡng 2%."
+        return result
+
+    result["verified"] = True
+    result["mm_per_pt"] = round(mean_ratio, 8)
+    result["reason"] = f"Đã kiểm tra {len(checked)} chuẩn vector; độ lệch tỷ lệ X/Y {spread * 100:.2f}%."
+    return result
+
+
+def validate_command_dimensions(analysis: dict[str, Any], command: dict[str, Any]) -> list[str]:
+    """Compare commanded 3D bounding dimensions to explicitly reported drawing dimensions."""
+    issues: list[str] = []
+    expected_length = analysis.get("overall_length_mm")
+    expected_width = analysis.get("overall_width_mm")
+    expected_height = analysis.get("overall_height_mm")
+    values = [expected_length, expected_width, expected_height]
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0 for value in values):
+        return ["Thiếu một trong ba kích thước tổng thể Dài/Rộng/Cao đọc được trực tiếp để đối chiếu CAD."]
+
+    expected = [float(value) for value in values]
+    op = command.get("op")
+    actual_x = actual_y = actual_z = None
+    if op == "create_rectangle_extrude":
+        actual_x = float(command.get("length") or 0)
+        actual_y = float(command.get("width") or 0)
+        actual_z = float(command.get("thickness") or 0)
+    elif op == "create_circle_extrude":
+        actual_x = float(command.get("diameter") or 0)
+        actual_y = float(command.get("diameter") or 0)
+        actual_z = float(command.get("thickness") or 0)
+    elif op == "create_profile_extrude":
+        points = command.get("points") or []
+        if not points:
+            return ["Biên dạng CAD không có tọa độ điểm."]
+        xs = [float(point["x"]) for point in points]
+        ys = [float(point["y"]) for point in points]
+        actual_x = max(xs) - min(xs)
+        actual_y = max(ys) - min(ys)
+        actual_z = float(command.get("thickness") or 0)
+    else:
+        return ["Loại lệnh hình học không được phép tự động dựng."]
+
+    tolerance = lambda value: max(0.05, abs(value) * 0.001)
+    direct_match = (
+        abs(actual_x - expected[0]) <= tolerance(expected[0])
+        and abs(actual_y - expected[1]) <= tolerance(expected[1])
+    )
+    swapped_match = (
+        abs(actual_x - expected[1]) <= tolerance(expected[1])
+        and abs(actual_y - expected[0]) <= tolerance(expected[0])
+    )
+    if not (direct_match or swapped_match):
+        issues.append(
+            f"Kích thước bao XY của lệnh CAD ({actual_x:.3f} × {actual_y:.3f} mm) "
+            f"không khớp hai kích thước tổng thể ghi trên bản vẽ ({expected[0]:.3f} × {expected[1]:.3f} mm)."
+        )
+    if abs(actual_z - expected[2]) > tolerance(expected[2]):
+        issues.append(
+            f"Chiều dày/chiều cao CAD ({actual_z:.3f} mm) không khớp kích thước tổng thể thứ ba ({expected[2]:.3f} mm)."
+        )
+
+    if op == "create_profile_extrude":
+        dim_values = [
+            float(item["value"])
+            for item in analysis.get("dimensions_detected", [])
+            if isinstance(item, dict) and isinstance(item.get("value"), (int, float))
+        ]
+        for index, hole in enumerate(command.get("holes") or [], 1):
+            diameter = float(hole["diameter"])
+            if not any(abs(value - diameter) <= tolerance(diameter) for value in dim_values):
+                issues.append(
+                    f"Đường kính lỗ {index} ({diameter:g} mm) không tìm thấy trong danh sách kích thước đã đọc."
+                )
+    return issues
 
 
 def analyze_pdf(
