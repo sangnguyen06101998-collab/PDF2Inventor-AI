@@ -15,21 +15,110 @@ class InventorBridgeError(RuntimeError):
     """A user-facing Inventor automation error."""
 
 
-def connect_inventor():
-    """Return the currently running Autodesk Inventor COM application."""
+_COM_INITIALIZED = False
+
+
+def _format_com_error(exc):
+    """Return a useful HRESULT string for COM connection diagnostics."""
+    hresult = getattr(exc, "hresult", None)
+    if hresult is None and getattr(exc, "args", None):
+        first = exc.args[0]
+        if isinstance(first, int):
+            hresult = first
+    if isinstance(hresult, int):
+        unsigned = hresult & 0xFFFFFFFF
+        return f"HRESULT 0x{unsigned:08X} ({hresult}) · {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _find_inventor_in_rot(pythoncom, win32com_client):
+    """Try ROT monikers containing Inventor; never launch a new Inventor process."""
+    matches = []
     try:
+        rot = pythoncom.GetRunningObjectTable()
+        enum = rot.EnumRunning()
+        bind_context = pythoncom.CreateBindCtx(0)
+        while True:
+            batch = enum.Next(1)
+            if not batch:
+                break
+            moniker = batch[0]
+            try:
+                display_name = str(moniker.GetDisplayName(bind_context, None))
+            except Exception:
+                continue
+            if "inventor" not in display_name.lower():
+                continue
+            matches.append(display_name)
+            try:
+                unknown = rot.GetObject(moniker)
+                dispatch = unknown.QueryInterface(pythoncom.IID_IDispatch)
+                return win32com_client.Dispatch(dispatch), matches
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None, matches
+
+
+def connect_inventor():
+    """Attach to the running Inventor COM server without starting another instance."""
+    global _COM_INITIALIZED
+    try:
+        import pythoncom
         import win32com.client
     except Exception as exc:
         raise InventorBridgeError(
-            "Thiếu thư viện pywin32. Hãy cài lại bản EXE V0.4 có tích hợp Inventor COM."
+            "Không nạp được pywin32/pythoncom. Hãy dùng Artifact V0.4 mới nhất, "
+            "không dùng bản EXE cũ."
         ) from exc
 
     try:
-        return win32com.client.GetActiveObject("Inventor.Application")
+        # PySide6 owns the GUI main thread. Explicitly initialize COM on that thread.
+        if not _COM_INITIALIZED:
+            pythoncom.CoInitialize()
+            _COM_INITIALIZED = True
+
+        progid = "Inventor.Application"
+        clsid = pythoncom.CLSIDFromProgID(progid)
+
+        # First obtain the already-running COM object using its resolved CLSID.
+        try:
+            unknown = pythoncom.GetActiveObject(clsid)
+            dispatch = unknown.QueryInterface(pythoncom.IID_IDispatch)
+            app = win32com.client.Dispatch(dispatch)
+        except Exception as primary_exc:
+            # Some Inventor installations publish a ROT moniker that can be
+            # attached to even when direct ProgID lookup is unavailable.
+            app, rot_matches = _find_inventor_in_rot(pythoncom, win32com.client)
+            if app is None:
+                detail = _format_com_error(primary_exc)
+                hint = (
+                    "Kiểm tra Inventor và PDF2Inventor AI chạy cùng tài khoản Windows, "
+                    "cùng mức quyền (cả hai bình thường hoặc cả hai Run as administrator), "
+                    "và cùng phiên đăng nhập. Đóng Inventor rồi mở lại trước khi kết nối."
+                )
+                monikers = (
+                    " ROT Inventor: " + "; ".join(rot_matches[:5])
+                    if rot_matches else " Không thấy moniker chứa tên Inventor trong ROT."
+                )
+                raise InventorBridgeError(
+                    "Không lấy được đối tượng COM của Inventor đang chạy. "
+                    + detail + ". " + hint + monikers
+                ) from primary_exc
+
+        # Verify that the returned object is the real Inventor automation server.
+        version = str(app.SoftwareVersion.DisplayVersion)
+        if not version:
+            raise RuntimeError("Inventor không trả về SoftwareVersion.")
+        return app
+    except InventorBridgeError:
+        raise
     except Exception as exc:
         raise InventorBridgeError(
-            "Không tìm thấy Inventor đang chạy. Hãy mở Autodesk Inventor 2018 trước, "
-            "mở một file IPT, rồi nhấn Kết nối lại."
+            "Lỗi khi khởi tạo/kết nối COM với Inventor: "
+            + _format_com_error(exc)
+            + ". Hãy bảo đảm Inventor và PDF2Inventor AI chạy cùng mức quyền Windows."
         ) from exc
 
 
