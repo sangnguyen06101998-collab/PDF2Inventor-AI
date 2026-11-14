@@ -498,7 +498,7 @@ class MainWindow(QMainWindow):
             targets.append((comp, cmd))
 
         # Geometry operations are intentionally a single-command transaction in V0.5.
-        if targets and targets[0][1].get("op") == "create_rectangle_extrude":
+        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
             try:
@@ -508,10 +508,16 @@ class MainWindow(QMainWindow):
                     raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor.")
             except Exception as e:
                 QMessageBox.warning(self, "Inventor", str(e)); return
-            dims = (
-                f'Dài X: {cmd["length"]} mm · Rộng Y: {cmd["width"]} mm · '
-                f'Đùn Z: {cmd["thickness"]} mm · Gốc: ({cmd.get("origin_x", 0)}, {cmd.get("origin_y", 0)}) mm'
-            )
+            if cmd["op"] == "create_rectangle_extrude":
+                dims = (
+                    f'Dài X: {cmd["length"]} mm · Rộng Y: {cmd["width"]} mm · '
+                    f'Đùn Z: {cmd["thickness"]} mm · Gốc: ({cmd.get("origin_x", 0)}, {cmd.get("origin_y", 0)}) mm'
+                )
+            else:
+                dims = (
+                    f'Đường kính: {cmd["diameter"]} mm · Đùn/Cắt Z: {cmd["thickness"]} mm · '
+                    f'Tâm: ({cmd.get("center_x", 0)}, {cmd.get("center_y", 0)}) mm'
+                )
             intro = (
                 "Sẽ tạo hình học thật trong Inventor 2018: " + str(path) + "\n" +
                 dims + "\nOperation: " + str(cmd.get("operation", "auto")) +
@@ -520,12 +526,15 @@ class MainWindow(QMainWindow):
             if QMessageBox.question(self, "Xác nhận tạo Sketch/Extrude", intro + "\n\nTiếp tục?") != QMessageBox.Yes:
                 return
             try:
-                result = create_rectangle_extrude(doc, self.inventor_app, cmd)
+                if cmd["op"] == "create_rectangle_extrude":
+                    result = create_rectangle_extrude(doc, self.inventor_app, cmd)
+                else:
+                    result = create_circle_extrude(doc, self.inventor_app, cmd)
                 comp["parameters"] = copy.deepcopy(result["parameters"])
                 self.project["change_history"].append({
                     "timestamp": now(),
                     "component_id": cmd["component_id"],
-                    "operation": "create_rectangle_extrude",
+                    "operation": cmd["op"],
                     "dimensions_mm": result["dimensions_mm"],
                     "parameter_names": result["parameter_names"],
                     "backup_file": result["backup_path"],
@@ -535,7 +544,7 @@ class MainWindow(QMainWindow):
                     "reason": cmd.get("reason", "")
                 })
                 self.inv_log.append(
-                    "ĐÃ TẠO SKETCH + EXTRUDE TRONG INVENTOR\n"
+                    "ĐÃ TẠO SKETCH + FEATURE TRONG INVENTOR\n"
                     + "FILE: " + result["document_path"] + "\n"
                     + "BACKUP: " + result["backup_path"] + "\n"
                     + "THAM SỐ: " + json.dumps(result["parameter_names"], ensure_ascii=False)
@@ -544,11 +553,11 @@ class MainWindow(QMainWindow):
                 if self.project_path: save_json(self.project_path, self.project)
                 else: self.save_project()
                 self.command_result.append(
-                    "\nĐÃ TẠO SKETCH + EXTRUDE TRONG INVENTOR. Backup: " + result["backup_path"]
+                    "\nĐÃ TẠO SKETCH + FEATURE TRONG INVENTOR. Backup: " + result["backup_path"]
                 )
                 QMessageBox.information(
                     self, "Hoàn tất",
-                    "Đã tạo Sketch chữ nhật có ràng buộc và Extrude trong Inventor.\n"
+                    "Đã tạo Sketch và Extrude/Cut trong Inventor.\n"
                     "Backup: " + result["backup_path"]
                 )
             except Exception as e:
