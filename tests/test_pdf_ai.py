@@ -44,6 +44,33 @@ class PdfAiSchemaTests(unittest.TestCase):
         self.assertEqual(result["commands"][0]["unit"], "mm")
         self.assertEqual(result["warnings"], ["Check the drawing before applying."])
 
+    def test_profile_extrude_command_is_validated_and_wrapped(self):
+        analysis = {
+            "cad_command": {
+                "op": "create_profile_extrude",
+                "component_id": "WRONG_ID",
+                "thickness": 8,
+                "points": [
+                    {"x": 0, "y": 0},
+                    {"x": 100, "y": 0},
+                    {"x": 100, "y": 60},
+                    {"x": 0, "y": 60},
+                ],
+                "holes": [{"center_x": 20, "center_y": 20, "diameter": 10}],
+                "unit": "mm",
+                "operation": "new_body",
+                "direction": "positive",
+                "reason": "Flat bracket profile",
+            },
+            "questions": [],
+            "warnings": [],
+        }
+        result = build_command_document(analysis, "PROJECT_Y", "PART_Y")
+        self.assertEqual(result["commands"][0]["component_id"], "PART_Y")
+        self.assertEqual(result["commands"][0]["op"], "create_profile_extrude")
+        self.assertEqual(len(result["commands"][0]["points"]), 4)
+        self.assertEqual(len(result["commands"][0]["holes"]), 1)
+
     def test_rejects_cad_command_with_missing_dimension(self):
         analysis = {
             "cad_command": {
