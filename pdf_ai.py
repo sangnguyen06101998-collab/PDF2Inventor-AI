@@ -175,7 +175,7 @@ def analysis_schema() -> dict[str, Any]:
     nullable_number = {"type": ["number", "null"]}
     nullable_string = {"type": ["string", "null"]}
     command_properties = {
-        "op": {"type": "string", "enum": ["create_rectangle_extrude", "create_circle_extrude"]},
+        "op": {"type": "string", "enum": ["create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"]},
         "component_id": {"type": "string"},
         "length": nullable_number,
         "width": nullable_number,
@@ -188,6 +188,28 @@ def analysis_schema() -> dict[str, Any]:
         "unit": {"type": "string", "enum": ["mm"]},
         "operation": {"type": "string", "enum": ["auto", "new_body"]},
         "direction": {"type": "string", "enum": ["positive", "negative"]},
+        "points": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+                "required": ["x", "y"],
+                "additionalProperties": False,
+            },
+        },
+        "holes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "center_x": {"type": "number"},
+                    "center_y": {"type": "number"},
+                    "diameter": {"type": "number"},
+                },
+                "required": ["center_x", "center_y", "diameter"],
+                "additionalProperties": False,
+            },
+        },
         "reason": {"type": "string"},
     }
     command_schema = {
@@ -257,13 +279,14 @@ YÊU CẦU PHÂN TÍCH:
 9. Nếu có nhiều chi tiết trong bản lắp, không được giả làm một khối đơn.
 
 GIỚI HẠN CAD HIỆN TẠI:
-- Chỉ có thể tạo một feature cơ bản cho mỗi lần chạy: Sketch hình chữ nhật + Extrude thành lăng trụ chữ nhật, hoặc Sketch hình tròn + Extrude thành trụ.
-- Không thể tự tạo đầy đủ lỗ, rãnh, bậc, ren, vát, bo, chi tiết lắp ráp hoặc nhiều feature trong cùng một lần phân tích.
-- Chỉ đề xuất cad_command khi bản vẽ thực sự là một chi tiết đơn có hình dạng đúng với một trong hai feature cơ bản trên và đủ kích thước tường minh.
+- Có thể tạo một feature cho mỗi lần chạy: Sketch chữ nhật + Extrude; Sketch tròn + Extrude; hoặc Sketch biên dạng đa giác kín + Extrude, kèm các lỗ tròn xuyên suốt.
+- Biên dạng đa giác chỉ dùng cạnh thẳng; mỗi lỗ tròn phải có đường kính và tọa độ tâm rõ ràng.
+- Chỉ đề xuất cad_command khi bản vẽ là chi tiết đơn dạng lăng trụ có tiết diện không đổi theo chiều dày và đủ kích thước tường minh. Nếu có mặt nghiêng 3D, cung tròn ngoài, rãnh không tròn, bậc chiều sâu hoặc nhiều feature thì không phát lệnh.
 - Với mọi bản vẽ phức tạp hơn, hãy trả cad_command = null, liệt kê các câu hỏi/feature chưa hỗ trợ. Không được tạo một khối đơn giản sai hình dạng rồi tuyên bố hoàn tất.
 - Không được dùng component_id khác với component_id được cung cấp.
 - Nếu đề xuất create_rectangle_extrude: điền length, width, thickness bằng mm; các trường khác không dùng thì null; unit=mm; operation=new_body; direction=positive; origin_x=origin_y=0 trừ khi bản vẽ chỉ rõ tọa độ đặt khác.
-- Nếu đề xuất create_circle_extrude: điền diameter và thickness bằng mm; các trường khác không dùng thì null; unit=mm; operation=new_body; direction=positive; center_x=center_y=0 trừ khi bản vẽ chỉ rõ vị trí khác.
+- Nếu đề xuất create_circle_extrude: điền diameter và thickness bằng mm; các trường hình học không dùng thì null hoặc mảng rỗng; unit=mm; operation=new_body; direction=positive; center_x=center_y=0 trừ khi bản vẽ chỉ rõ vị trí khác.
+- Nếu đề xuất create_profile_extrude: điền points là danh sách tọa độ x/y theo mm của đường bao ngoài theo thứ tự liên tiếp, đóng kín tự động; gốc XY ở góc trái-dưới của hình chiếu chính. Điền holes cho lỗ tròn xuyên suốt với center_x/center_y/diameter bằng mm; nếu không có lỗ dùng mảng rỗng. Điền thickness bằng mm; unit=mm; operation=new_body; direction=positive. Các trường riêng cho hình chữ nhật/hình tròn phải null.
 - Không dùng lệnh cut hoặc tự phối hợp nhiều feature trong bản phát hành này.
 
 Chỉ trả dữ liệu theo JSON Schema đã cung cấp. Không thêm Markdown.
@@ -396,7 +419,7 @@ def analyze_pdf(
     if command is not None:
         if not isinstance(command, dict):
             raise PdfAIError("cad_command không đúng cấu trúc.")
-        allowed_ops = {"create_rectangle_extrude", "create_circle_extrude"}
+        allowed_ops = {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"}
         if command.get("op") not in allowed_ops:
             raise PdfAIError("AI trả về loại feature chưa được hỗ trợ.")
         command["component_id"] = component_id
@@ -422,6 +445,9 @@ def build_command_document(
         elif command.get("op") == "create_circle_extrude":
             from inventor_geometry import validate_circle_command
             validate_circle_command(command)
+        elif command.get("op") == "create_profile_extrude":
+            from inventor_geometry import validate_profile_command
+            validate_profile_command(command)
         else:
             raise PdfAIError("Loại feature AI đề xuất chưa được hỗ trợ.")
     except PdfAIError:
