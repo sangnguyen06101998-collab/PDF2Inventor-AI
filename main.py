@@ -477,11 +477,11 @@ class MainWindow(QMainWindow):
             "Với create_rectangle_extrude, tạo Sketch chữ nhật trên mặt phẳng XY và Extrude/Cut; bắt buộc có length, width, thickness và unit=mm. "
             "origin_x và origin_y là tọa độ góc đầu tiên từ gốc XY, mặc định 0 mm nếu người dùng không chỉ định. "
             "Với create_circle_extrude, tạo Sketch tròn có đường kính điều khiển và Extrude/Cut; bắt buộc có diameter, thickness và unit=mm. "
-            "Với create_profile_extrude, tạo profile tùy chỉnh gồm loops polyline/circle trên plane XY/XZ/YZ rồi Extrude/Cut; mọi tọa độ và distance phải lấy từ bản vẽ, unit=mm. "
+            "Với create_profile_extrude, tạo profile tùy chỉnh gồm loops polyline/circle/segments line-arc/segments line-arc trên plane XY/XZ/YZ, có offset_mm rồi Extrude/Cut; mọi tọa độ và distance phải lấy từ bản vẽ, unit=mm. "
             "Với create_hole, dùng native HoleFeature với centers [[x,y],...], diameter, plane, offset_mm, extent through_all hoặc distance, depth_mm nếu là lỗ mù, direction và unit=mm. "
             "Với create_thread, chỉ tạo ren trên mặt trụ đã có, dùng face_index và start_edge_index được xác minh, designation và thread_type đúng bảng ren Inventor; không tự suy ra M size từ đường kính nếu chưa rõ. "
             "Với create_fillet/create_chamfer, chỉ dùng edge_indices 1-based đã được xác minh trên đúng phiên bản IPT hiện tại; không đoán số cạnh. "
-            "Với create_circular_pattern/create_rectangular_pattern, chỉ dùng feature_names và axis_index có thật trong IPT; rectangular pattern hiện một hướng. "
+            "Với create_circular_pattern/create_rectangular_pattern, chỉ dùng feature_names và axis_index có thật trong IPT; rectangular pattern hỗ trợ một hoặc hai hướng. "
             "Với create_assembly_iam, chỉ tạo IAM từ các IPT tồn tại, output_path mới và position_mm XYZ đã được xác định; không tự đoán ràng buộc lắp ghép. "
             "center_x và center_y là tọa độ tâm hình tròn, mặc định 0 mm nếu người dùng không chỉ định. "
             "operation chỉ được dùng auto, join, new_body hoặc cut; direction chỉ được dùng positive hoặc negative. "
@@ -489,7 +489,7 @@ class MainWindow(QMainWindow):
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "V0.6 hỗ trợ profile tùy chỉnh trên XY/XZ/YZ, native Hole, ren tiêu chuẩn trên mặt trụ, Extrude/Cut, Fillet/Chamfer theo cạnh, Circular/Rectangular Pattern một trục và tạo IAM từ IPT có sẵn. Không tự đoán cạnh, trục, feature name, kích thước hay ràng buộc lắp ráp."
+            "V0.6 hỗ trợ profile tùy chỉnh gồm cung tròn trên XY/XZ/YZ, offset plane, native Hole, ren tiêu chuẩn, Extrude/Cut, Fillet/Chamfer, Circular Pattern, Rectangular Pattern hai hướng và tạo IAM từ IPT có sẵn. Không tự đoán cạnh, trục, feature name, kích thước hay ràng buộc lắp ráp."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
