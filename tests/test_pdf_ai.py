@@ -343,6 +343,45 @@ class VectorScaleVerificationTests(unittest.TestCase):
         self.assertEqual(result["holes"][0]["center_x"], 50.0)
         self.assertEqual(result["holes"][0]["center_y"], 60.0)
 
+    def test_vector_inner_polygon_becomes_an_exact_cutout(self):
+        report = self.vector_report()
+        report["page_details"][0]["paths"].append({
+            "id": 14,
+            "closed": True,
+            "bbox_pt": [60, 30, 80, 40],
+            "segments": [
+                ["L", 60, 30, 80, 30],
+                ["L", 80, 30, 80, 40],
+                ["L", 80, 40, 60, 40],
+                ["L", 60, 40, 60, 30],
+            ],
+        })
+        result = derive_profile_from_vectors(report, 1, 12, [13], 2.0, [14])
+        self.assertEqual(len(result["cutouts"]), 1)
+        self.assertEqual(result["cutouts"][0], [
+            {"x": 100.0, "y": 60.0},
+            {"x": 140.0, "y": 60.0},
+            {"x": 140.0, "y": 40.0},
+            {"x": 100.0, "y": 40.0},
+        ])
+
+    def test_vector_curve_is_sampled_into_short_segments(self):
+        report = self.vector_report()
+        report["page_details"][0]["paths"].append({
+            "id": 15,
+            "closed": True,
+            "bbox_pt": [10, 10, 100, 50],
+            "segments": [
+                ["L", 10, 10, 90, 10],
+                ["C", 90, 10, 100, 10, 100, 50, 90, 50],
+                ["L", 90, 50, 10, 50],
+                ["L", 10, 50, 10, 10],
+            ],
+        })
+        result = derive_profile_from_vectors(report, 1, 15, [], 1.0)
+        self.assertGreater(len(result["points"]), 4)
+        self.assertEqual(result["curves_approximated"], 1)
+
     def test_bounding_dimensions_must_match_drawing_values(self):
         analysis = {
             "overall_length_mm": 200,
