@@ -29,6 +29,9 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Run Inventor bridge unit tests
+        run: python -m unittest discover -s tests -v
+
       - name: Build EXE
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
