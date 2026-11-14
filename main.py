@@ -499,7 +499,7 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}]
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern", "create_assembly_iam"}]
             if geometry_commands and len(commands) != 1:
                 issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
             for i, cmd in enumerate(commands, 1):
