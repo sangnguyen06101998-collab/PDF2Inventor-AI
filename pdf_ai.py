@@ -748,9 +748,19 @@ def build_command_document(
     command = analysis.get("cad_command")
     if not isinstance(command, dict):
         raise PdfAIError("Bản vẽ này chưa đủ điều kiện để tự dựng bằng các feature V0.6 hiện có.")
+    if analysis.get("questions"):
+        raise PdfAIError("Bản vẽ còn câu hỏi chưa được giải quyết; không được phép phát lệnh CAD.")
+    scale_verification = analysis.get("scale_verification") or {}
+    if analysis.get("scale_status") != "verified" or not scale_verification.get("verified"):
+        raise PdfAIError("Tỷ lệ hình học chưa được xác minh bằng vector PDF; không thể chuyển lệnh CAD.")
+    if analysis.get("confidence") != "high":
+        raise PdfAIError("Độ tin cậy phân tích chưa ở mức cao.")
     command = dict(command)
     command["component_id"] = component_id
     command["unit"] = "mm"
+    dimension_issues = validate_command_dimensions(analysis, command)
+    if dimension_issues:
+        raise PdfAIError("Lệnh CAD không khớp kích thước bản vẽ: " + " ".join(dimension_issues))
     try:
         if command.get("op") == "create_rectangle_extrude":
             from inventor_geometry import validate_rectangle_command
@@ -776,6 +786,8 @@ def build_command_document(
 
 
 def format_analysis_report(analysis: dict[str, Any]) -> str:
+    vector = analysis.get("vector_summary") or {}
+    scale = analysis.get("scale_verification") or {}
     lines = [
         "KẾT QUẢ PHÂN TÍCH BẢN VẼ",
         "==========================",
@@ -784,6 +796,16 @@ def format_analysis_report(analysis: dict[str, Any]) -> str:
         "Loại bản vẽ: " + str(analysis.get("drawing_type") or "unknown"),
         "Đơn vị: " + str(analysis.get("units") or "unknown"),
         "Độ tin cậy tổng thể: " + str(analysis.get("confidence") or "unknown"),
+        "",
+        "VECTOR PDF GỐC",
+        "Có vector CAD: " + str(vector.get("native_vector_pdf", False)),
+        "Số path: " + str(vector.get("total_path_count", 0)),
+        "Số đoạn vector: " + str(vector.get("total_vector_segment_count", 0)),
+        "Số text span: " + str(vector.get("total_text_span_count", 0)),
+        "Ảnh nhúng: " + str(vector.get("total_embedded_image_count", 0)),
+        "Tỷ lệ hiệu chuẩn: " + str(analysis.get("scale_status", "unverified")),
+        "Kiểm tra tỷ lệ: " + str(scale.get("reason", "Chưa kiểm tra")),
+        "mm/point đã xác minh: " + str(scale.get("mm_per_pt", "N/A")),
         "",
         "KÍCH THƯỚC TỔNG THỂ (mm)",
         "Dài: " + str(analysis.get("overall_length_mm")),
