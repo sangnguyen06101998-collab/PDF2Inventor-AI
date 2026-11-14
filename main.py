@@ -9,8 +9,9 @@ from PySide6.QtWidgets import (
     QLabel, QListWidget, QTextEdit, QFileDialog, QMessageBox, QSplitter,
     QGroupBox, QLineEdit, QTabWidget, QInputDialog, QDialog
 )
+from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
 
-APP_TITLE = "PDF2Inventor AI · V0.3 Portable"
+APP_TITLE = "PDF2Inventor AI · V0.4 Inventor COM"
 SCHEMA_VERSION = "0.2"
 
 def now():
@@ -49,16 +50,18 @@ class MainWindow(QMainWindow):
         self.pdf_path = None
         self.page_index = 0
         self.pending_commands = None
+        self.inventor_app = None
 
         tabs = QTabWidget()
         self.setCentralWidget(tabs)
         tabs.addTab(self.build_project_tab(), "Dự án CAD")
         tabs.addTab(self.build_pdf_tab(), "PDF")
+        tabs.addTab(self.build_inventor_tab(), "Inventor 2018")
         tabs.addTab(self.build_chat_tab(), "ChatGPT thủ công")
         tabs.addTab(self.build_command_tab(), "Nhập lệnh CAD")
         self.tabs = tabs
         self.refresh_project_view()
-        self.statusBar().showMessage("V0.3 PORTABLE · Không cần cài Python · FREE MODE · Dữ liệu lưu cục bộ")
+        self.statusBar().showMessage("V0.4 PORTABLE · Inventor 2018 COM · FREE MODE")
 
     def build_project_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
@@ -155,6 +158,89 @@ class MainWindow(QMainWindow):
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
+
+
+    def build_inventor_tab(self):
+        w = QWidget(); root = QVBoxLayout(w)
+        label = QLabel("Mở một file IPT trong Inventor 2018, sau đó kết nối để đọc tham số và liên kết với chi tiết trong dự án.")
+        label.setWordWrap(True); root.addWidget(label)
+        self.inv_status = QLabel("Chưa kết nối Inventor.")
+        root.addWidget(self.inv_status)
+        self.inv_doc_label = QLabel("Tài liệu: chưa đọc")
+        self.inv_doc_label.setWordWrap(True); root.addWidget(self.inv_doc_label)
+        row = QHBoxLayout()
+        for caption, handler in [
+            ("Kết nối Inventor", self.ui_connect_inventor),
+            ("Đọc tài liệu", self.ui_read_inventor),
+            ("Gắn IPT vào chi tiết", self.ui_link_inventor),
+            ("Đồng bộ tham số", self.ui_sync_inventor)
+        ]:
+            btn = QPushButton(caption); btn.clicked.connect(handler); row.addWidget(btn)
+        root.addLayout(row)
+        self.inv_log = QTextEdit(); self.inv_log.setReadOnly(True); root.addWidget(self.inv_log, 1)
+        return w
+
+    def ui_connect_inventor(self):
+        try:
+            self.inventor_app = connect_inventor()
+            version = str(self.inventor_app.SoftwareVersion.DisplayVersion)
+            self.inv_status.setText("Đã kết nối Autodesk Inventor " + version)
+            self.inv_log.append("KẾT NỐI THÀNH CÔNG · " + version)
+            self.ui_read_inventor()
+        except Exception as e:
+            QMessageBox.warning(self, "Kết nối Inventor", str(e))
+
+    def ui_read_inventor(self):
+        try:
+            if self.inventor_app is None: self.inventor_app = connect_inventor()
+            doc = get_active_document(self.inventor_app)
+            info = get_document_info(doc, self.inventor_app)
+            params = read_parameters(doc)
+            self.inv_doc_label.setText("Tài liệu: " + info["display_name"] + " · " + (info["full_path"] or "Chưa lưu"))
+            self.inv_log.append("TÀI LIỆU: " + info["display_name"] + "\nĐƯỜNG DẪN: " + info["full_path"] + "\n" + "\n".join([k + " = " + str(v.get("expression")) for k,v in params.items()]))
+            self.active_inventor_doc = doc
+            return doc, info, params
+        except Exception as e:
+            QMessageBox.warning(self, "Đọc Inventor", str(e))
+            return None, None, None
+
+    def ui_link_inventor(self):
+        row = self.component_list.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Chọn chi tiết", "Hãy chọn một chi tiết trong tab Dự án CAD.")
+            return
+        doc, info, params = self.ui_read_inventor()
+        if doc is None: return
+        if info["extension"] != ".ipt" or not info["full_path"] or not os.path.isfile(info["full_path"]):
+            QMessageBox.warning(self, "File không hợp lệ", "Hãy mở và lưu một file IPT trước.")
+            return
+        comp = self.project["components"][row]
+        comp["inventor_file"] = info["full_path"]
+        comp["parameters"] = params
+        self.refresh_project_view()
+        if self.project_path: save_json(self.project_path, self.project)
+        self.inv_log.append("ĐÃ GẮN IPT VỚI " + str(comp.get("component_id")))
+
+    def ui_sync_inventor(self):
+        row = self.component_list.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Chọn chi tiết", "Hãy chọn một chi tiết trong tab Dự án CAD.")
+            return
+        comp = self.project["components"][row]
+        path = comp.get("inventor_file")
+        if not path:
+            QMessageBox.information(self, "Chưa liên kết", "Hãy gắn IPT vào chi tiết trước.")
+            return
+        try:
+            if self.inventor_app is None: self.inventor_app = connect_inventor()
+            doc = get_document_by_path(self.inventor_app, path)
+            if doc is None: raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor.")
+            comp["parameters"] = read_parameters(doc)
+            self.refresh_project_view()
+            if self.project_path: save_json(self.project_path, self.project)
+            self.inv_log.append("ĐÃ ĐỒNG BỘ THAM SỐ TỪ " + path)
+        except Exception as e:
+            QMessageBox.warning(self, "Đồng bộ Inventor", str(e))
 
     def update_project_name(self):
         self.project["project_name"] = self.project_name.text().strip() or "New CAD Project"
@@ -359,39 +445,65 @@ class MainWindow(QMainWindow):
             self.command_result.setPlainText("JSON / kiểm tra không hợp lệ:\n" + str(e))
             return False
 
+
     def apply_commands(self):
         if not self.validate_commands():
             QMessageBox.warning(self, "Chưa thể áp dụng", "Hãy sửa lỗi hoặc bổ sung thông tin trước."); return
         data = self.pending_commands
         if not data.get("commands"):
             QMessageBox.information(self, "Không có thay đổi", "ChatGPT chưa đưa ra lệnh sửa nào."); return
-        preview = []
+        targets = []
         for cmd in data["commands"]:
             comp = next(c for c in self.project["components"] if c["component_id"] == cmd["component_id"])
-            p = comp["parameters"][cmd["parameter"]]
-            old = p["value"] if isinstance(p, dict) else p
-            preview.append(f'{cmd["component_id"]} · {cmd["parameter"]}: {old} → {cmd["value"]} {cmd["unit"]}')
-        if QMessageBox.question(self, "Xác nhận áp dụng", "Các thay đổi vào hồ sơ dự án (chưa sửa Inventor):\n\n" + "\n".join(preview) + "\n\nTiếp tục?") != QMessageBox.Yes:
-            return
-        for cmd in data["commands"]:
-            comp = next(c for c in self.project["components"] if c["component_id"] == cmd["component_id"])
-            param = comp["parameters"][cmd["parameter"]]
-            if isinstance(param, dict):
-                old = param.get("value")
-                param["value"] = cmd["value"]
-            else:
-                old = param
-                comp["parameters"][cmd["parameter"]] = {"value": cmd["value"], "unit": cmd["unit"]}
-            self.project["change_history"].append({
-                "timestamp": now(), "component_id": cmd["component_id"],
-                "parameter": cmd["parameter"], "old_value": old,
-                "new_value": cmd["value"], "unit": cmd["unit"],
-                "reason": cmd.get("reason", ""), "source": "ChatGPT manual"
-            })
+            targets.append((comp, cmd))
+        paths = {os.path.normcase(os.path.abspath(c.get("inventor_file", ""))) for c,cmd in targets if c.get("inventor_file")}
+        if paths and (len(paths) != 1 or any(not c.get("inventor_file") for c,cmd in targets)):
+            QMessageBox.warning(self, "Nhiều file IPT", "Hãy chia lệnh theo từng file IPT."); return
+        use_inv = bool(paths)
+        doc = None
+        path = next(iter(paths)) if paths else None
+        if use_inv:
+            try:
+                if self.inventor_app is None: self.inventor_app = connect_inventor()
+                doc = get_document_by_path(self.inventor_app, path)
+                if doc is None: raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor.")
+            except Exception as e:
+                QMessageBox.warning(self, "Inventor", str(e)); return
+        lines = []
+        for comp,cmd in targets:
+            p = comp["parameters"].get(cmd["parameter"], {})
+            old = p.get("expression", p.get("value")) if isinstance(p,dict) else p
+            lines.append(str(cmd["component_id"]) + " · " + cmd["parameter"] + ": " + str(old) + " → " + str(cmd["value"]) + " " + str(cmd["unit"]))
+        intro = ("Sẽ sửa mô hình Inventor thật: " + str(path) + "\nSẽ tạo bản sao dự phòng trước khi sửa." if use_inv else "Chỉ cập nhật hồ sơ JSON; chưa liên kết IPT.")
+        if QMessageBox.question(self, "Xác nhận áp dụng", intro + "\n\n" + "\n".join(lines) + "\n\nTiếp tục?") != QMessageBox.Yes: return
+        backup = None
+        if use_inv:
+            changes = [{"parameter":cmd["parameter"],"value":cmd["value"],"unit":cmd["unit"]} for comp,cmd in targets]
+            try:
+                result = apply_parameter_changes(doc, changes)
+                backup = result["backup_path"]
+                self.inv_log.append("ĐÃ SỬA IPT: " + path + "\nBACKUP: " + backup)
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi Inventor", str(e)); return
+        for comp,cmd in targets:
+            p = comp["parameters"].get(cmd["parameter"], {})
+            old = p.get("expression", p.get("value")) if isinstance(p,dict) else p
+            comp["parameters"][cmd["parameter"]] = {"value":cmd["value"],"unit":cmd["unit"],"expression":str(cmd["value"])+" "+str(cmd["unit"])}
+            self.project["change_history"].append({"timestamp":now(),"component_id":cmd["component_id"],"parameter":cmd["parameter"],"old_value":old,"new_value":cmd["value"],"unit":cmd["unit"],"reason":cmd.get("reason",""),"source":"ChatGPT manual","applied_to_inventor":use_inv,"inventor_file":path,"backup_file":backup})
+        if use_inv:
+            try:
+                verified = read_parameters(doc)
+                for comp,cmd in targets: comp["parameters"] = copy.deepcopy(verified)
+            except Exception: pass
         self.refresh_project_view()
-        self.save_project()
-        self.command_result.append("\n\nĐã cập nhật hồ sơ JSON. Chưa thay đổi hình học trong Inventor; cầu nối Inventor sẽ được triển khai ở phiên bản sau.")
-        QMessageBox.information(self, "Đã cập nhật hồ sơ", "Đã lưu thông số và lịch sử thay đổi vào dự án.")
+        if self.project_path: save_json(self.project_path,self.project)
+        else: self.save_project()
+        if use_inv:
+            self.command_result.append("\nĐÃ CẬP NHẬT INVENTOR THẬT. Backup: " + str(backup))
+            QMessageBox.information(self,"Hoàn tất","Đã cập nhật Inventor và lưu IPT.\nBackup: "+str(backup))
+        else:
+            self.command_result.append("\nĐã cập nhật hồ sơ JSON; Inventor không thay đổi.")
+            QMessageBox.information(self,"Hoàn tất","Đã cập nhật hồ sơ JSON. Chưa liên kết IPT.")
 
 class JsonEditor(QDialog):
     def __init__(self, text, parent=None):
