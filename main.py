@@ -80,8 +80,8 @@ def default_project():
         "assembly_relations": [],
         "change_history": [],
         "notes": [
-            "Chỉ đưa cho ChatGPT thông tin cần thiết; không gửi PDF nếu không cần.",
-            "V0.5 hỗ trợ cập nhật tham số và dựng Sketch chữ nhật + Extrude trên IPT đã liên kết; mọi lệnh phải được xác nhận trước khi áp dụng."
+            "Có thể dùng chế độ AI thị giác để gửi PDF qua OpenAI API, hoặc chế độ ChatGPT thủ công.",
+            "V0.6 hỗ trợ Sketch chữ nhật/tròn/biên dạng đa giác có lỗ tròn xuyên suốt và Extrude trên IPT đã liên kết; mọi lệnh phải được xác nhận trước khi áp dụng."
         ]
     }
 
@@ -430,6 +430,14 @@ class MainWindow(QMainWindow):
             doc = get_document_by_path(self.inventor_app, path)
             if doc is None:
                 raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor 2018.")
+            if QMessageBox.question(
+                self,
+                "Xác nhận gửi PDF lên OpenAI",
+                "Toàn bộ file PDF sẽ được gửi qua Internet tới OpenAI API để AI đọc chữ và hình ảnh các trang. "
+                "Yêu cầu API được tính phí riêng, không trừ từ hạn mức ChatGPT. "
+                "Chỉ tiếp tục nếu bạn được phép gửi bản vẽ này ra dịch vụ bên ngoài.\n\nTiếp tục gửi PDF?"
+            ) != QMessageBox.Yes:
+                return
             self.ai_target_component_id = comp["component_id"]
             args = {
                 "pdf_path": self.pdf_path,
@@ -549,7 +557,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("V0.6 hỗ trợ AI đọc PDF và dựng lăng trụ cơ bản bằng Sketch chữ nhật/tròn/biên dạng đa giác có lỗ tròn. Chưa hỗ trợ đầy đủ chi tiết có nhiều feature hoặc IAM.")
+        warning = QLabel("V0.6: AI đọc PDF và dựng lăng trụ chữ nhật, trụ tròn hoặc biên dạng đa giác phẳng có lỗ tròn xuyên suốt. Nhiều feature/assembly vẫn cần nâng cấp.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -803,6 +811,24 @@ class MainWindow(QMainWindow):
                 "direction": "positive",
                 "reason": "Tạo khối chữ nhật kiểm thử"
             },
+            "profile_command_schema": {
+                "op": "create_profile_extrude",
+                "component_id": "MÃ_CHI_TIẾT_CÓ_IPT_ĐÃ_GẮN",
+                "points": [
+                    {"x": 0, "y": 0},
+                    {"x": 100, "y": 0},
+                    {"x": 100, "y": 60},
+                    {"x": 0, "y": 60}
+                ],
+                "holes": [
+                    {"center_x": 20, "center_y": 20, "diameter": 10}
+                ],
+                "thickness": 8,
+                "unit": "mm",
+                "operation": "new_body",
+                "direction": "positive",
+                "reason": "Tạo bản mã có lỗ xuyên"
+            },
             "circle_command_schema": {
                 "op": "create_circle_extrude",
                 "component_id": "MÃ_CHI_TIẾT_CÓ_IPT_ĐÃ_GẮN",
@@ -817,19 +843,20 @@ class MainWindow(QMainWindow):
             }
         }
         instruction = (
-            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor AI V0.5, Autodesk Inventor 2018. "
+            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor AI V0.6, Autodesk Inventor 2018. "
             "Đọc hồ sơ JSON bên dưới và yêu cầu của người dùng. "
             "Với set_parameter, chỉ dùng component_id và parameter có sẵn trong hồ sơ. "
             "Với create_rectangle_extrude, tạo Sketch chữ nhật trên mặt phẳng XY và Extrude/Cut; bắt buộc có length, width, thickness và unit=mm. "
             "origin_x và origin_y là tọa độ góc đầu tiên từ gốc XY, mặc định 0 mm nếu người dùng không chỉ định. "
             "Với create_circle_extrude, tạo Sketch tròn có đường kính điều khiển và Extrude/Cut; bắt buộc có diameter, thickness và unit=mm. "
+            "Với create_profile_extrude, tạo biên dạng đa giác khép kín trên XY và có thể thêm các lỗ tròn xuyên suốt; points là tọa độ x/y mm theo thứ tự, holes có tâm và đường kính mm, thickness là chiều dày. "
             "center_x và center_y là tọa độ tâm hình tròn, mặc định 0 mm nếu người dùng không chỉ định. "
             "operation chỉ được dùng auto, join, new_body hoặc cut; direction chỉ được dùng positive hoặc negative. "
-            "Mỗi gói JSON chỉ dùng một chế độ: set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh create_rectangle_extrude/create_circle_extrude. Không trộn hai loại lệnh. "
+            "Mỗi gói JSON chỉ dùng một chế độ: set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh hình học. Không trộn hai loại lệnh. "
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "V0.5 chưa hỗ trợ native Hole, Fillet, Chamfer, Pattern hoặc xóa Feature; lỗ tròn đơn giản dùng create_circle_extrude với operation=cut."
+            "V0.6 chưa hỗ trợ native Hole, Fillet, Chamfer, Pattern, Thread hoặc assembly; không tự giả định hình học còn thiếu."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
