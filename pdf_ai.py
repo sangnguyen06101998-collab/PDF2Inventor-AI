@@ -107,7 +107,7 @@ def _dpapi_crypt(data: bytes, *, decrypt: bool = False) -> bytes:
     finally:
         kernel32.LocalFree.argtypes = [ctypes.c_void_p]
         kernel32.LocalFree.restype = ctypes.c_void_p
-        kernel32.LocalFree(output_blob.pbData)
+        kernel32.LocalFree(ctypes.cast(output_blob.pbData, ctypes.c_void_p))
         if decrypt and description:
             kernel32.LocalFree(ctypes.cast(description, ctypes.c_void_p))
 
