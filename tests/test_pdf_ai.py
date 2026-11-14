@@ -223,6 +223,7 @@ class VectorScaleVerificationTests(unittest.TestCase):
             "native_vector_pdf": True,
             "page_details": [{
                 "page": 1,
+                "dimension_text_candidates": ["200 mm", "100 mm", "150 mm"],
                 "paths": [
                     {
                         "id": 10,
