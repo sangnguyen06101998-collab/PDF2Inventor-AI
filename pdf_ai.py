@@ -414,6 +414,8 @@ def _dimension_text_value_mm(value: Any, default_units: str = "mm") -> float | N
         return numeric * 10.0
     if default_units == "m":
         return numeric * 1000.0
+    if default_units != "mm":
+        return None
     return numeric
 
 
