@@ -18,7 +18,7 @@ Chạy `build_windows_exe.bat`. Cách này cần Python 3.12 64-bit trên máy b
 
 ## Giới hạn của phiên bản
 
-- EXE chứa ứng dụng V0.3 Portable dựa trên mã nguồn V0.2 Manual Chat.
+- EXE V0.4 gồm giao diện PDF2Inventor AI, chế độ ChatGPT thủ công và cầu nối COM Inventor.
 - PDF được đọc và xử lý cục bộ; chế độ ChatGPT vẫn là sao chép ngữ cảnh / nhập JSON thủ công, không dùng API.
-- Phiên bản này CHƯA tạo hoặc chỉnh sửa hình học IPT/IAM thực tế trong Inventor. Bridge Inventor 2018 sẽ được phát triển riêng sau khi kiểm tra ứng dụng chạy ổn định.
+- V0.4 có thể đọc và cập nhật tham số của một file IPT đã liên kết. V0.4 chưa tạo Sketch/Extrude/Hole mới và chưa chỉnh sửa IAM.
 - Để mở PDF, dữ liệu dự án và các file đã xuất, ứng dụng cần quyền đọc/ghi thư mục người dùng.
