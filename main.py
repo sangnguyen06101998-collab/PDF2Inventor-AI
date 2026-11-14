@@ -29,7 +29,7 @@ def default_project():
         "change_history": [],
         "notes": [
             "Chỉ đưa cho ChatGPT thông tin cần thiết; không gửi PDF nếu không cần.",
-            "Các thay đổi trong V0.2 mới cập nhật hồ sơ JSON, chưa điều khiển hình học Inventor."
+            "V0.4 có thể cập nhật tham số của file IPT đã liên kết; lệnh phải được xác nhận trước khi áp dụng."
         ]
     }
 
@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
         rl.addWidget(self.project_view)
         split.addWidget(left); split.addWidget(right); split.setSizes([350, 850])
         root.addWidget(split, 1)
-        note = QLabel("V0.2 lưu hồ sơ tham số và lịch sử. Chưa thay đổi hình học trong Inventor.")
+        note = QLabel("V0.4: tham số của IPT đã liên kết có thể được cập nhật sau khi người dùng xác nhận lệnh.")
         note.setStyleSheet("color:#b45309;")
         root.addWidget(note)
         return w
@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         loadb = QPushButton("Chọn tệp JSON"); loadb.clicked.connect(self.import_commands)
         validate = QPushButton("Kiểm tra lệnh"); validate.clicked.connect(self.validate_commands)
-        applyb = QPushButton("Áp dụng vào hồ sơ"); applyb.clicked.connect(self.apply_commands)
+        applyb = QPushButton("Áp dụng lệnh"); applyb.clicked.connect(self.apply_commands)
         row.addWidget(loadb); row.addWidget(validate); row.addWidget(applyb)
         root.addLayout(row)
         self.command_text = QTextEdit()
@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("CẢNH BÁO: V0.2 chỉ cập nhật dữ liệu tham số trong project.json. Chưa sửa file IPT/IAM trong Inventor.")
+        warning = QLabel("V0.4 chỉ sửa tham số của IPT đã liên kết; chưa tạo Sketch/Extrude/Hole mới hoặc chỉnh sửa IAM.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -418,7 +418,7 @@ class MainWindow(QMainWindow):
             issues = []
             for i, cmd in enumerate(data.get("commands", []), 1):
                 if cmd.get("op") != "set_parameter":
-                    issues.append(f"Lệnh {i}: chỉ hỗ trợ set_parameter trong V0.2."); continue
+                    issues.append(f"Lệnh {i}: V0.4 hiện chỉ hỗ trợ lệnh set_parameter."); continue
                 comp = next((c for c in self.project["components"] if c["component_id"] == cmd.get("component_id")), None)
                 if not comp:
                     issues.append(f'Lệnh {i}: không tìm thấy chi tiết {cmd.get("component_id")}.'); continue
