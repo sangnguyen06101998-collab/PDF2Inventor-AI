@@ -1,7 +1,13 @@
 """Read-only Inventor B-rep topology inventory for stable edge/face selection."""
 def inspect_topology(document):
     component=document.ComponentDefinition
-    result={"bodies":[]}
+    result={"bodies":[],"features":[]}
+    try:
+        for fi in range(1,int(component.Features.Count)+1):
+            feature=component.Features.Item(fi)
+            result["features"].append({"feature_index":fi,"name":str(feature.Name),"type":str(getattr(feature,"Type","unknown"))})
+    except Exception:
+        pass
     for bi in range(1,int(component.SurfaceBodies.Count)+1):
         body=component.SurfaceBodies.Item(bi)
         faces=[]
