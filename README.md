@@ -1,4 +1,4 @@
-# PDF2Inventor AI V0.5 · Inventor 2018 Sketch + Extrude
+# PDF2Inventor Local Edition V0.6 · Offline vector-first PDF + Inventor 2018
 
 ## Chức năng đã có trong mã nguồn
 - Chế độ ChatGPT thủ công, không dùng API trả phí.
@@ -103,3 +103,29 @@ Người dùng cuối không cần cài Python. Máy build GitHub Actions cài P
 - Các thay đổi thật trên IPT tạo file backup bên cạnh file gốc.
 - Nếu tạo hình học thất bại, ứng dụng cố gắng hủy transaction và báo đường dẫn backup.
 - Chỉ phát hành EXE V0.5 sau khi kiểm thử tự động/build thành công và kiểm tra thực tế trên Inventor 2018.
+
+
+## V0.6 Local Edition · Phân tích PDF không dùng OpenAI API
+
+V0.6 bổ sung tab PDF xử lý cục bộ:
+- Mở PDF và xem từng trang bằng PyMuPDF.
+- Trích xuất text spans, font, vị trí text, ứng viên kích thước, vector paths và bounding box.
+- Xuất báo cáo JSON đầy đủ để kiểm tra và làm đầu vào cho bước dựng hình.
+- Không gọi OpenAI API, không tải PDF lên mạng, không cần GPU.
+- Giữ lại COM bridge và các thao tác Sketch/Extrude cơ bản từ V0.5.
+
+### Giới hạn chính xác cần biết
+- Tọa độ PDF là point (1/72 inch), không mặc định là mm.
+- V0.6 hiện là bộ đọc/phân tích vector và text cục bộ; chưa tự động biến mọi đường bao 2D thành mô hình 3D.
+- Việc hiệu chuẩn tỷ lệ phải dựa trên kích thước ghi rõ trên bản vẽ; hệ thống không được tự đoán tỷ lệ.
+- Không thể suy ra chiều sâu, mặt khuất, ren, bo/vát hoặc kết cấu lắp ráp nếu PDF không cung cấp đủ hình chiếu/mặt cắt.
+- Nếu PDF là ảnh scan, cần OCR cục bộ bổ sung; nhánh này hiện chưa đóng gói OCR.
+- Kiểm thử GitHub Actions không thể thay thế kiểm thử COM geometry trên Autodesk Inventor 2018 thật.
+
+### Sử dụng phân tích PDF cục bộ
+1. Chạy EXE trên Windows 64-bit.
+2. Mở tab PDF và chọn PDF bản vẽ.
+3. Nhấn **Phân tích PDF vector tại máy**.
+4. Kiểm tra số vector paths, text spans và các kích thước tìm được.
+5. Nhấn **Xuất báo cáo JSON** để lưu toàn bộ dữ liệu trích xuất.
+6. Chỉ chuyển sang dựng hình khi hình học và kích thước đã được xác minh.
