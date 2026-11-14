@@ -142,21 +142,27 @@ def create_profile_extrude(document, inventor_app, command):
         geometry = inventor_app.TransientGeometry
         for loop in cfg["loops"]:
             if loop["type"] == "polyline":
-                pts = loop["points"]
-                for i, p in enumerate(pts):
-                    q = pts[(i + 1) % len(pts)]
-                    a = geometry.CreatePoint2d(p[0] / 10.0, p[1] / 10.0)
-                    b = geometry.CreatePoint2d(q[0] / 10.0, q[1] / 10.0)
-                    sketch.SketchLines.AddByTwoPoints(a, b)
+                coords = loop["points"]
+                points = [sketch.SketchPoints.Add(
+                    geometry.CreatePoint2d(p[0] / 10.0, p[1] / 10.0), False
+                ) for p in coords]
+                for i, point in enumerate(points):
+                    sketch.SketchLines.AddByTwoPoints(point, points[(i + 1) % len(points)])
             elif loop["type"] == "segments":
-                for segment in loop["segments"]:
-                    start = geometry.CreatePoint2d(segment["start"][0]/10.0, segment["start"][1]/10.0)
-                    end = geometry.CreatePoint2d(segment["end"][0]/10.0, segment["end"][1]/10.0)
+                segments = loop["segments"]
+                start_points = [sketch.SketchPoints.Add(
+                    geometry.CreatePoint2d(seg["start"][0]/10.0, seg["start"][1]/10.0), False
+                ) for seg in segments]
+                for i, segment in enumerate(segments):
+                    start_point = start_points[i]
+                    end_point = start_points[(i + 1) % len(start_points)]
                     if segment["type"] == "line":
-                        sketch.SketchLines.AddByTwoPoints(start, end)
+                        sketch.SketchLines.AddByTwoPoints(start_point, end_point)
                     else:
                         center = geometry.CreatePoint2d(segment["center"][0]/10.0, segment["center"][1]/10.0)
-                        sketch.SketchArcs.AddByCenterStartEndPoint(center, start, end, segment["counterclockwise"])
+                        sketch.SketchArcs.AddByCenterStartEndPoint(
+                            center, start_point, end_point, segment["counterclockwise"]
+                        )
             else:
                 center = geometry.CreatePoint2d(loop["center_x"] / 10.0, loop["center_y"] / 10.0)
                 sketch.SketchCircles.AddByCenterRadius(center, loop["radius"] / 10.0)
