@@ -3,6 +3,8 @@ import json
 import os
 import tempfile
 from pathlib import Path
+
+import fitz
 from unittest.mock import patch
 
 from pdf_ai import (
@@ -183,7 +185,15 @@ class PdfAiSchemaTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "drawing.pdf"
-            path.write_bytes(b"%PDF-1.4 test fixture")
+            document = fitz.open()
+            page = document.new_page(width=300, height=200)
+            page.draw_rect(fitz.Rect(30, 30, 150, 90), color=(0, 0, 0), width=0.5)
+            page.draw_line(fitz.Point(30, 110), fitz.Point(150, 110), color=(0, 0, 0), width=0.25)
+            page.draw_line(fitz.Point(30, 120), fitz.Point(30, 160), color=(0, 0, 0), width=0.25)
+            page.insert_text((60, 25), "120 mm", fontsize=8)
+            page.insert_text((10, 80), "40 mm", fontsize=8)
+            document.save(path)
+            document.close()
             with patch("pdf_ai.urllib.request.urlopen", side_effect=fake_urlopen):
                 result = analyze_pdf(
                     pdf_path=str(path),
