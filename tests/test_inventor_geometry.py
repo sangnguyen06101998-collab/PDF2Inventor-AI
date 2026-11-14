@@ -1,7 +1,7 @@
 import unittest
 
 from inventor_bridge import InventorBridgeError
-from inventor_geometry import validate_rectangle_command
+from inventor_geometry import validate_rectangle_command, validate_circle_command
 
 
 class RectangleCommandValidationTests(unittest.TestCase):
@@ -66,6 +66,47 @@ class RectangleCommandValidationTests(unittest.TestCase):
         }
         with self.assertRaises(InventorBridgeError):
             validate_rectangle_command(command)
+
+
+
+
+class CircleCommandValidationTests(unittest.TestCase):
+    def valid_command(self):
+        return {
+            "op": "create_circle_extrude",
+            "diameter": 20,
+            "thickness": 8,
+            "center_x": 25,
+            "center_y": 30,
+            "unit": "mm",
+            "operation": "cut",
+            "direction": "positive",
+        }
+
+    def test_valid_circle_cut_is_normalized(self):
+        result = validate_circle_command(self.valid_command())
+        self.assertEqual(result["diameter"], 20)
+        self.assertEqual(result["thickness"], 8)
+        self.assertEqual(result["operation"], "cut")
+        self.assertEqual(result["parameter_names"]["diameter"], "Diameter")
+
+    def test_rejects_circle_without_explicit_units(self):
+        command = self.valid_command()
+        command.pop("unit")
+        with self.assertRaises(InventorBridgeError):
+            validate_circle_command(command)
+
+    def test_rejects_nonpositive_diameter(self):
+        command = self.valid_command()
+        command["diameter"] = -1
+        with self.assertRaises(InventorBridgeError):
+            validate_circle_command(command)
+
+    def test_rejects_invalid_circle_operation(self):
+        command = self.valid_command()
+        command["operation"] = "blend"
+        with self.assertRaises(InventorBridgeError):
+            validate_circle_command(command)
 
 
 if __name__ == "__main__":
