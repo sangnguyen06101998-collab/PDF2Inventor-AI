@@ -9,11 +9,13 @@
 
 ## Inventor 2018 native feature operations currently implemented
 - Rectangle and circle Sketch + Extrude/Cut.
-- create_profile_extrude: custom closed polyline/circle loops on origin planes XY, XZ or YZ, then Extrude/Join/New Body/Cut.
+- create_profile_extrude: custom closed polyline/circle loops on XY, XZ or YZ origin planes, including offset_mm parallel planes, then Extrude/Join/New Body/Cut.
+- create_hole: native drilled Hole feature with multiple sketch-point locations, through-all or blind depth.
+- create_thread: native standard thread on an existing cylindrical face using Inventor thread-table designation.
 - create_fillet: native constant-radius Fillet on explicit 1-based edge indices.
 - create_chamfer: native distance Chamfer on explicit 1-based edge indices.
 - create_circular_pattern: native circular feature pattern using named existing features and a work-axis index.
-- create_rectangular_pattern: native one-direction rectangular feature pattern using named existing features and a work-axis index.
+- create_rectangular_pattern: native one- or two-direction rectangular feature pattern using named existing features and work-axis indices.
 - create_assembly_iam: creates a new IAM and inserts existing IPT files at explicitly supplied XYZ positions in millimetres.
 
 ## Advanced profile JSON example
@@ -44,10 +46,16 @@
 - Each geometry, edge finishing, pattern or assembly command must be submitted in its own JSON package.
 - Fillet/chamfer edge indices are 1-based indices in the current body's Edges collection. They can change after topology changes; re-inspect the model before reusing them.
 - Pattern features must exist by exact feature name; work-axis indices must match the active IPT.
-- Custom profile creation currently supports straight polyline segments and circles; splines, arcs, loft, sweep, revolve, shell, sheet-metal folds, threads, variable fillets, multi-direction rectangular patterns and full automatic multi-feature reconstruction are not yet supported.
+- Thread face/edge indices and fillet/chamfer edge indices must be read from the current model topology. These indices can change after editing features.
+- The Inventor tab includes a read-only B-rep face/edge inventory for identifying current face and edge indices.
+- Custom profile creation currently supports straight polyline segments and circles; splines, arcs, loft, sweep, revolve, shell, sheet-metal folds, variable fillets and full automatic multi-feature reconstruction are not yet supported.
+- Threading is native standard-thread feature creation on a selected cylindrical face; it does not yet auto-detect all thread callouts or choose faces without topology review.
 - Every model edit makes a backup first and asks the user to confirm before applying.
 - GitHub Actions validates Python and packages the EXE; it cannot certify Inventor COM geometry. Real Inventor 2018 validation remains necessary.
 
 ## Build
 - GitHub Actions builds a Windows x64 one-file EXE on pushes to feature/v0.6-local-edition.
 - Download artifact PDF2Inventor_AI_Windows_x64 from the Actions run after it completes.
+
+## Ordered multi-feature plans
+A command package may contain several geometry operations in sequence when all commands target the same component_id and IPT. Each feature creates its own backup. If any step fails, execution stops and reports completed steps and backups; earlier successful steps remain applied until restored from backup.
