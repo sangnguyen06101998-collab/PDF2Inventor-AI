@@ -219,14 +219,17 @@ class MainWindow(QMainWindow):
         root.addWidget(settings)
 
         actions = QHBoxLayout()
-        link_part = QPushButton("Gắn IPT Inventor đang mở")
+        create_part = QPushButton("Tạo IPT mới")
+        create_part.clicked.connect(self.create_new_ipt_for_ai)
+        link_part = QPushButton("Gắn IPT đang mở")
         link_part.clicked.connect(self.link_active_ipt_for_ai)
         self.ai_analyze_button = QPushButton("ĐỌC PDF VÀ PHÂN TÍCH")
         self.ai_analyze_button.clicked.connect(self.start_pdf_ai_analysis)
         self.ai_to_command_button = QPushButton("Chuyển lệnh sang CAD")
         self.ai_to_command_button.clicked.connect(self.send_ai_command_to_cad)
         self.ai_to_command_button.setEnabled(False)
-        actions.addWidget(link_part); actions.addWidget(self.ai_analyze_button); actions.addWidget(self.ai_to_command_button)
+        actions.addWidget(create_part); actions.addWidget(link_part)
+        actions.addWidget(self.ai_analyze_button); actions.addWidget(self.ai_to_command_button)
         root.addLayout(actions)
         self.ai_status_label = QLabel("Chưa chạy phân tích.")
         self.ai_status_label.setWordWrap(True)
@@ -287,6 +290,49 @@ class MainWindow(QMainWindow):
             self.ai_key_status.setText("Đã xóa khóa API.")
         except Exception as e:
             QMessageBox.critical(self, "Không xóa được khóa", str(e))
+
+    def create_new_ipt_for_ai(self):
+        if self.inventor_app is None:
+            try:
+                self.inventor_app = connect_inventor()
+            except Exception as e:
+                QMessageBox.warning(self, "Kết nối Inventor", str(e))
+                return
+        default_name = "PDF2Inventor_NewPart.ipt"
+        if self.pdf_path:
+            default_name = Path(self.pdf_path).stem[:80] + ".ipt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Lưu chi tiết IPT mới", default_name, "Inventor Part (*.ipt)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".ipt"):
+            path += ".ipt"
+        if os.path.exists(path):
+            QMessageBox.warning(self, "File đã tồn tại", "Không ghi đè IPT có sẵn. Hãy chọn tên file mới.")
+            return
+        doc = None
+        try:
+            template = self.inventor_app.FileManager.GetTemplateFile(12290)
+            doc = self.inventor_app.Documents.Add(12290, template, True)
+            doc.SaveAs(path, False)
+            doc.Activate()
+            self.component_list.setCurrentRow(-1)
+            if not self.link_active_ipt_for_ai():
+                try: doc.Close(True)
+                except Exception: pass
+                return
+            self.inv_log.append("ĐÃ TẠO IPT MỚI TỪ TEMPLATE: " + path)
+            self.ai_status_label.setText(
+                "Đã tạo IPT mới và liên kết vào dự án. Tiếp theo nhấn ĐỌC PDF VÀ PHÂN TÍCH."
+            )
+            if not self.project_path:
+                self.statusBar().showMessage("Đã tạo IPT. Hãy lưu hồ sơ dự án để giữ liên kết file.")
+        except Exception as e:
+            if doc is not None:
+                try: doc.Close(True)
+                except Exception: pass
+            QMessageBox.critical(self, "Không tạo được IPT mới", str(e))
 
     def link_active_ipt_for_ai(self):
         doc, info, params = self.ui_read_inventor()
