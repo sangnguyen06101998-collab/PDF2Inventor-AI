@@ -415,6 +415,19 @@ def build_command_document(
     command = dict(command)
     command["component_id"] = component_id
     command["unit"] = "mm"
+    try:
+        if command.get("op") == "create_rectangle_extrude":
+            from inventor_geometry import validate_rectangle_command
+            validate_rectangle_command(command)
+        elif command.get("op") == "create_circle_extrude":
+            from inventor_geometry import validate_circle_command
+            validate_circle_command(command)
+        else:
+            raise PdfAIError("Loại feature AI đề xuất chưa được hỗ trợ.")
+    except PdfAIError:
+        raise
+    except Exception as exc:
+        raise PdfAIError("Lệnh CAD AI tạo ra không hợp lệ: " + str(exc)) from exc
     return {
         "project_id": project_id,
         "commands": [command],
