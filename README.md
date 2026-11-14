@@ -10,9 +10,10 @@
 - Đồng bộ tham số Inventor vào hồ sơ.
 - Nhận lệnh JSON set_parameter; ứng dụng xác nhận, tạo backup, cập nhật tham số, gọi Update và Save.
 - Nhận lệnh JSON create_rectangle_extrude để tạo Sketch hình chữ nhật trên mặt phẳng XY và Extrude thành khối 3D.
+- Nhận lệnh JSON create_circle_extrude để tạo Sketch hình tròn có đường kính điều khiển và Extrude thành trụ hoặc Extrude Cut để khoét lỗ/hốc tròn.
 - Sketch chữ nhật được ràng buộc ngang/dọc, cố định góc đầu tiên và có hai kích thước điều khiển bằng tham số người dùng.
 - Chiều sâu Extrude tham chiếu tham số người dùng riêng.
-- operation auto tự chọn Join nếu vùng hình học mới giao với solid hiện có theo bounding box; nếu không giao thì chọn New Body.
+- operation auto tự chọn Join nếu vùng hình học mới giao với solid hiện có theo bounding box; nếu không giao thì chọn New Body. operation=cut tạo hốc/khoét bằng Extrude Cut và yêu cầu có solid hiện hữu.
 - Mỗi thao tác hình học tạo backup IPT trước khi thực thi; có transaction để hủy thao tác khi phát sinh lỗi.
 - Đọc lại tham số sau khi dựng hình và lưu lịch sử vào hồ sơ dự án.
 
@@ -45,10 +46,35 @@ origin_x và origin_y là vị trí góc đầu tiên tính từ gốc tọa đ�
 
 operation nhận auto, join hoặc new_body. direction nhận positive hoặc negative. Ba kích thước bắt buộc là số dương và unit bắt buộc là mm.
 
+
+## JSON mẫu: khoét lỗ tròn đường kính 20 mm
+
+    {
+      "project_id": "PROJECT_ID_THỰC_TẾ",
+      "commands": [
+        {
+          "op": "create_circle_extrude",
+          "component_id": "COMPONENT_ID_THỰC_TẾ",
+          "diameter": 20,
+          "thickness": 8,
+          "center_x": 75,
+          "center_y": 35,
+          "unit": "mm",
+          "operation": "cut",
+          "direction": "positive",
+          "reason": "Khoét lỗ tròn kiểm thử"
+        }
+      ],
+      "questions": [],
+      "warnings": []
+    }
+
+Tâm hình tròn được xác định bởi center_x và center_y trong hệ tọa độ XY. Với operation=cut, Inventor dùng biên dạng tròn để cắt vào solid hiện có; chiều sâu cắt là thickness. Hãy kiểm tra vị trí và hướng cắt trước khi xác nhận.
+
 ## Giới hạn V0.5
-- Tạo hình học hiện hỗ trợ một lệnh create_rectangle_extrude trong mỗi gói JSON; không trộn lệnh dựng hình với set_parameter trong cùng gói.
+- Tạo hình học hiện hỗ trợ một lệnh create_rectangle_extrude hoặc create_circle_extrude trong mỗi gói JSON; không trộn lệnh dựng hình với set_parameter trong cùng gói.
 - Hình chữ nhật dựng trên mặt phẳng XY gốc; chưa có chọn mặt phẳng hoặc mặt nghiêng.
-- Chưa hỗ trợ đường tròn, biên dạng tự do, Hole, Cut, Fillet, Chamfer, Pattern hoặc chỉnh sửa IAM.
+- Chưa hỗ trợ biên dạng tự do, native Hole Feature, Fillet, Chamfer, Pattern hoặc chỉnh sửa IAM. Lỗ tròn hiện tại được tạo bằng Sketch tròn + Extrude Cut, không phải native Hole Feature.
 - Không tự động nhận dạng kích thước PDF. Người dùng và ChatGPT cần xác định kích thước trước khi phát lệnh.
 - Join trong chế độ auto được ước lượng theo bounding box; nếu hình học thực không giao nhau, Inventor có thể từ chối Join và thông báo lỗi.
 - V0.5 cần được thử nghiệm trên Inventor 2018 thực tế. Kiểm thử CI xác nhận cấu trúc, validation và khả năng build; không thay thế kiểm thử CAD COM trên máy người dùng.
