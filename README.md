@@ -27,12 +27,14 @@ Nạp bản vẽ PDF trực tiếp vào phần mềm, để AI thị giác đọ
 - Sửa tham số IPT.
 - Sketch chữ nhật + Extrude thành lăng trụ chữ nhật, kích thước có tham số.
 - Sketch tròn + Extrude thành khối trụ, đường kính có tham số.
+- Sketch biên dạng đa giác kín + Extrude, hỗ trợ lỗ tròn xuyên suốt có đường kính điều khiển.
 - Extrude Cut bằng lệnh hình tròn chỉ trong chế độ CAD thủ công và khi IPT đã có solid.
 - Tạo backup và yêu cầu xác nhận trước khi sửa IPT.
 
 ## Giới hạn quan trọng của AI trong V0.6
-- Bộ sinh lệnh tự động mới chỉ phát một feature cơ bản cho một chi tiết đơn: khối lăng trụ chữ nhật hoặc khối trụ.
-- Nếu bản vẽ có lỗ, rãnh, bậc, ren, mặt nghiêng, vát, bo, nhiều feature hoặc bản lắp nhiều chi tiết, AI phải trả câu hỏi/cảnh báo và không phát lệnh hình học đơn giản dễ gây sai chi tiết.
+- Bộ sinh lệnh tự động phát một feature cho một chi tiết đơn: lăng trụ chữ nhật, khối trụ, hoặc biên dạng đa giác phẳng có lỗ tròn xuyên suốt rồi Extrude.
+- Các biên dạng đa giác chỉ dùng cạnh thẳng; lỗ tròn phải có đường kính/tọa độ tâm đọc được rõ ràng.
+- Nếu bản vẽ có lỗ bậc, rãnh không tròn, bậc chiều sâu, ren, mặt nghiêng 3D, vát, bo, nhiều feature hoặc bản lắp nhiều chi tiết, AI phải trả câu hỏi/cảnh báo và không phát lệnh hình học đơn giản dễ gây sai chi tiết.
 - Chưa tự dựng một bản lắp hoàn chỉnh, chưa tạo native Hole, Fillet, Chamfer, Pattern, Thread hoặc bản vẽ 2D từ 3D.
 - Không suy kích thước từ tỷ lệ hình nếu không có kích thước tham chiếu; không tự giả định vật liệu, chiều dày, dung sai hoặc kích thước thiếu.
 - Mô hình AI có thể đọc sai nét/ký hiệu. Người dùng phải kiểm tra báo cáo và xem trước JSON trước khi xác nhận.
