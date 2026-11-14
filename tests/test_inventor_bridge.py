@@ -123,6 +123,7 @@ class InventorBridgeTests(unittest.TestCase):
 
         with patch.dict(sys.modules, {
             "pythoncom": fake_pythoncom,
+            "pywintypes": fake_pywintypes,
             "win32com": win32com_module,
             "win32com.client": client_module,
         }):
