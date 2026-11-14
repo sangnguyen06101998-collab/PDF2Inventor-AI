@@ -111,7 +111,8 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.ai_tab, "AI đọc bản vẽ")
         tabs.addTab(self.build_inventor_tab(), "Inventor 2018")
         tabs.addTab(self.build_chat_tab(), "ChatGPT thủ công")
-        tabs.addTab(self.build_command_tab(), "Nhập lệnh CAD")
+        self.command_tab = self.build_command_tab()
+        tabs.addTab(self.command_tab, "Nhập lệnh CAD")
         self.tabs = tabs
         self.refresh_project_view()
         self.statusBar().showMessage("V0.6 · PDF Vision AI · Inventor 2018 COM")
@@ -248,6 +249,204 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.ai_key_status.setText("Lỗi cấu hình: " + str(e))
         return w
+
+    def open_ai_analysis(self):
+        if not self.pdf_path:
+            self.open_pdf()
+            if not self.pdf_path:
+                return
+        self.tabs.setCurrentWidget(self.ai_tab)
+
+    def save_ai_settings(self):
+        try:
+            entered_key = self.ai_key_input.text().strip()
+            save_settings(
+                self.ai_model_input.text().strip(),
+                str(self.ai_detail_combo.currentData()),
+                api_key=entered_key if entered_key else None,
+            )
+            self.ai_key_input.clear()
+            if get_api_key():
+                self.ai_key_status.setText("Đã lưu cấu hình. Khóa API được mã hóa bằng Windows DPAPI theo tài khoản hiện tại.")
+            else:
+                self.ai_key_status.setText("Đã lưu model và mức chi tiết PDF. Chưa có khóa API.")
+            QMessageBox.information(self, "Cấu hình AI", "Đã lưu cấu hình AI.")
+        except Exception as e:
+            QMessageBox.critical(self, "Không lưu được cấu hình AI", str(e))
+
+    def clear_ai_key(self):
+        if QMessageBox.question(self, "Xóa API Key", "Xóa khóa API đã mã hóa trên máy tính này?") != QMessageBox.Yes:
+            return
+        try:
+            save_settings(
+                self.ai_model_input.text().strip() or DEFAULT_MODEL,
+                str(self.ai_detail_combo.currentData()),
+                api_key="",
+            )
+            self.ai_key_input.clear()
+            self.ai_key_status.setText("Đã xóa khóa API.")
+        except Exception as e:
+            QMessageBox.critical(self, "Không xóa được khóa", str(e))
+
+    def link_active_ipt_for_ai(self):
+        doc, info, params = self.ui_read_inventor()
+        if doc is None:
+            return False
+        path = info.get("full_path") or ""
+        if info.get("extension") != ".ipt" or not path or not os.path.isfile(path):
+            QMessageBox.warning(
+                self, "File IPT chưa sẵn sàng",
+                "Hãy mở một file Part (.ipt) trong Inventor 2018 và Save As trước. "
+                "Nên dùng một IPT mới/trống để tạo chi tiết từ PDF."
+            )
+            return False
+
+        row = self.component_list.currentRow()
+        if row < 0:
+            source_name = Path(self.pdf_path).stem if self.pdf_path else Path(info["display_name"]).stem
+            safe = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in source_name.upper()).strip("_")
+            if not safe or not safe[0].isalpha():
+                safe = "PDF_" + safe
+            component_id = safe[:32] or "PDF_PART"
+            base = component_id
+            suffix = 2
+            existing_ids = {str(c.get("component_id")) for c in self.project.get("components", [])}
+            while component_id in existing_ids:
+                component_id = (base[:27] + "_" + str(suffix))[:32]
+                suffix += 1
+            comp = {
+                "component_id": component_id,
+                "name": Path(self.pdf_path).stem if self.pdf_path else Path(info["display_name"]).stem,
+                "document_type": "part",
+                "inventor_file": None,
+                "parameters": {},
+                "features": [],
+                "description": "Chi tiết được tạo từ phân tích PDF bằng AI."
+            }
+            self.project["components"].append(comp)
+            row = len(self.project["components"]) - 1
+        comp = self.project["components"][row]
+        comp["inventor_file"] = path
+        comp["parameters"] = params
+        self.refresh_project_view()
+        self.component_list.setCurrentRow(row)
+        if self.project_path:
+            save_json(self.project_path, self.project)
+        self.ai_status_label.setText(
+            "Đã gắn chi tiết " + str(comp["component_id"]) + " với IPT: " + path
+        )
+        self.inv_log.append("AI TARGET IPT: " + path + " · COMPONENT: " + str(comp["component_id"]))
+        return True
+
+    def start_pdf_ai_analysis(self):
+        if not self.pdf_path:
+            QMessageBox.information(self, "Chưa có PDF", "Hãy kéo thả hoặc chọn một file PDF bản vẽ trước.")
+            return
+        if self.ai_worker is not None and self.ai_worker.isRunning():
+            QMessageBox.information(self, "Đang phân tích", "AI đang đọc bản vẽ này.")
+            return
+        if not get_api_key():
+            QMessageBox.warning(
+                self, "Thiếu API Key",
+                "Hãy nhập OpenAI API Key ở phía trên và nhấn Lưu cấu hình. "
+                "API tính phí riêng, không dùng chung hạn mức ChatGPT."
+            )
+            return
+        row = self.component_list.currentRow()
+        if row < 0:
+            if not self.link_active_ipt_for_ai():
+                return
+            row = self.component_list.currentRow()
+        comp = self.project["components"][row]
+        path = comp.get("inventor_file") or ""
+        if not path or not os.path.isfile(path):
+            QMessageBox.warning(self, "Chưa gắn IPT", "Hãy gắn một file IPT đã lưu vào chi tiết đích trước.")
+            return
+        try:
+            if self.inventor_app is None:
+                self.inventor_app = connect_inventor()
+            doc = get_document_by_path(self.inventor_app, path)
+            if doc is None:
+                raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor 2018.")
+            self.ai_target_component_id = comp["component_id"]
+            args = {
+                "pdf_path": self.pdf_path,
+                "model": self.ai_model_input.text().strip() or DEFAULT_MODEL,
+                "detail": str(self.ai_detail_combo.currentData()),
+                "project_id": self.project["project_id"],
+                "component_id": self.ai_target_component_id,
+                "part_name": comp.get("name", self.ai_target_component_id),
+                "document_path": path,
+            }
+            self.ai_analyze_button.setEnabled(False)
+            self.ai_to_command_button.setEnabled(False)
+            self.ai_status_label.setText(
+                "Đang gửi PDF lên OpenAI API để đọc hình chiếu, kích thước, mặt cắt và đặc tính hình học. "
+                "Hãy giữ ứng dụng mở."
+            )
+            self.ai_worker = PdfAnalysisWorker(args, self)
+            self.ai_worker.analysis_ready.connect(self.on_pdf_ai_analysis_ready)
+            self.ai_worker.analysis_failed.connect(self.on_pdf_ai_analysis_failed)
+            self.ai_worker.start()
+        except Exception as e:
+            self.ai_analyze_button.setEnabled(True)
+            QMessageBox.warning(self, "Không thể phân tích PDF", str(e))
+
+    def on_pdf_ai_analysis_ready(self, analysis):
+        self.ai_analyze_button.setEnabled(True)
+        self.ai_analysis = analysis
+        report = format_analysis_report(analysis)
+        if analysis.get("cad_command"):
+            try:
+                document = build_command_document(
+                    analysis, self.project["project_id"], self.ai_target_component_id
+                )
+                report += "\n\nJSON LỆNH DỰ KIẾN\n" + json.dumps(document, ensure_ascii=False, indent=2)
+                has_questions = bool(document.get("questions"))
+                self.ai_to_command_button.setEnabled(not has_questions)
+                self.ai_status_label.setText(
+                    "AI đã phân tích xong và tạo được một lệnh hình học cơ bản. "
+                    "Bạn vẫn cần kiểm tra JSON rồi xác nhận trước khi sửa IPT."
+                    if not has_questions else
+                    "AI còn câu hỏi chưa được làm rõ; chưa cho phép chuyển lệnh sang Inventor."
+                )
+            except Exception as e:
+                self.ai_to_command_button.setEnabled(False)
+                report += "\n\nKhông tạo được lệnh CAD: " + str(e)
+                self.ai_status_label.setText("Đã đọc PDF nhưng lệnh CAD không đạt điều kiện an toàn.")
+        else:
+            self.ai_to_command_button.setEnabled(False)
+            self.ai_status_label.setText(
+                "Đã đọc PDF. Bản vẽ chưa thể dựng trung thực bằng nhóm feature hiện tại; "
+                "xem câu hỏi/cảnh báo trong báo cáo. Không tự tạo khối thay thế."
+            )
+        self.ai_report.setPlainText(report)
+        self.statusBar().showMessage("AI đã hoàn thành phân tích PDF.")
+
+    def on_pdf_ai_analysis_failed(self, message):
+        self.ai_analyze_button.setEnabled(True)
+        self.ai_to_command_button.setEnabled(False)
+        self.ai_status_label.setText("Phân tích thất bại.")
+        self.ai_report.setPlainText("KHÔNG PHÂN TÍCH ĐƯỢC PDF\n\n" + message)
+        QMessageBox.warning(self, "Lỗi phân tích AI", message)
+
+    def send_ai_command_to_cad(self):
+        if not self.ai_analysis or not self.ai_analysis.get("cad_command"):
+            QMessageBox.information(self, "Chưa có lệnh CAD", "AI chưa tạo được lệnh hình học hợp lệ.")
+            return
+        try:
+            document = build_command_document(
+                self.ai_analysis,
+                self.project["project_id"],
+                self.ai_target_component_id,
+            )
+            if document.get("questions"):
+                raise PdfAIError("Bản vẽ vẫn còn câu hỏi chưa được giải quyết; chưa được phép áp dụng.")
+            self.command_text.setPlainText(json.dumps(document, ensure_ascii=False, indent=2))
+            self.tabs.setCurrentWidget(self.command_tab)
+            self.validate_commands()
+        except Exception as e:
+            QMessageBox.warning(self, "Không chuyển được lệnh CAD", str(e))
 
     def build_chat_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
@@ -454,19 +653,48 @@ class MainWindow(QMainWindow):
 
     def open_pdf(self):
         path, _ = QFileDialog.getOpenFileName(self, "Chọn bản vẽ PDF", "", "PDF (*.pdf)")
-        if not path: return
+        if path:
+            self.load_pdf(path)
+
+    def load_pdf(self, path):
         try:
             d = fitz.open(path)
+            if not d.is_pdf or d.page_count < 1:
+                d.close()
+                raise ValueError("Tệp không phải PDF hợp lệ hoặc không có trang.")
             if self.pdf: self.pdf.close()
             self.pdf = d; self.pdf_path = path
             self.project["source_pdf"] = os.path.basename(path)
             self.pdf_label.setText(os.path.basename(path))
+            self.ai_pdf_label.setText("PDF: " + path)
             self.page_list.clear()
-            for i, p in enumerate(d):
-                self.page_list.addItem(f"Trang {i+1} · {p.rect.width:.0f}×{p.rect.height:.0f} pt")
+            for i, page in enumerate(d):
+                self.page_list.addItem(f"Trang {i+1} · {page.rect.width:.0f}×{page.rect.height:.0f} pt")
             self.page_list.setCurrentRow(0)
+            self.ai_analysis = None
+            self.ai_to_command_button.setEnabled(False)
+            self.ai_report.clear()
+            self.ai_status_label.setText("Đã nạp PDF. Hãy gắn file IPT đích và nhấn ĐỌC PDF VÀ PHÂN TÍCH.")
+            self.tabs.setCurrentWidget(self.tabs.widget(1))
+            self.statusBar().showMessage("Đã nạp PDF: " + os.path.basename(path))
         except Exception as e:
             QMessageBox.critical(self, "Không mở được PDF", str(e))
+
+    def dragEnterEvent(self, event):
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if any(url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf") for url in urls):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        for url in urls:
+            if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf"):
+                self.load_pdf(url.toLocalFile())
+                event.acceptProposedAction()
+                return
+        event.ignore()
 
     def show_page(self, index):
         if not self.pdf or index < 0 or index >= self.pdf.page_count: return
