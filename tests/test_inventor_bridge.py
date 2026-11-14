@@ -98,7 +98,7 @@ class InventorBridgeTests(unittest.TestCase):
         fake_pythoncom = FakePythonCom()
         fake_pywintypes = SimpleNamespace(IID=lambda value: "{FAKE-INVENTOR-CLSID}")
         client_module = ModuleType("win32com.client")
-        client_module.Dispatch = lambda dispatch: dispatch.QueryInterface(None)
+        client_module.Dispatch = lambda dispatch: dispatch
         win32com_module = ModuleType("win32com")
         win32com_module.client = client_module
 
