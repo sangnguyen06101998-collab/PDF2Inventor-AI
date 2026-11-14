@@ -1,105 +1,50 @@
-# PDF2Inventor AI V0.5 · Inventor 2018 Sketch + Extrude
+# PDF2Inventor AI V0.6 · PDF Vision → Inventor 2018
 
-## Chức năng đã có trong mã nguồn
-- Chế độ ChatGPT thủ công, không dùng API trả phí.
-- Tạo, mở và lưu hồ sơ dự án JSON.
-- Mở và xem PDF cục bộ bằng PyMuPDF.
-- Kết nối Autodesk Inventor đang chạy qua COM.
-- Đọc tham số của file IPT đang mở.
-- Liên kết một file IPT với một chi tiết trong hồ sơ dự án.
-- Đồng bộ tham số Inventor vào hồ sơ.
-- Nhận lệnh JSON set_parameter; ứng dụng xác nhận, tạo backup, cập nhật tham số, gọi Update và Save.
-- Nhận lệnh JSON create_rectangle_extrude để tạo Sketch hình chữ nhật trên mặt phẳng XY và Extrude thành khối 3D.
-- Nhận lệnh JSON create_circle_extrude để tạo Sketch hình tròn có đường kính điều khiển và Extrude thành trụ hoặc Extrude Cut để khoét lỗ/hốc tròn.
-- Sketch chữ nhật được ràng buộc ngang/dọc, cố định góc đầu tiên và có hai kích thước điều khiển bằng tham số người dùng.
-- Chiều sâu Extrude tham chiếu tham số người dùng riêng.
-- operation auto tự chọn Join nếu vùng hình học mới giao với solid hiện có theo bounding box; nếu không giao thì chọn New Body. operation=cut tạo hốc/khoét bằng Extrude Cut và yêu cầu có solid hiện hữu.
-- Mỗi thao tác hình học tạo backup IPT trước khi thực thi; có transaction để hủy thao tác khi phát sinh lỗi.
-- Đọc lại tham số sau khi dựng hình và lưu lịch sử vào hồ sơ dự án.
+## Mục tiêu V0.6
+Nạp bản vẽ PDF trực tiếp vào phần mềm, để AI thị giác đọc hình chiếu/mặt cắt/kích thước, tạo báo cáo và đề xuất lệnh CAD có cấu trúc. Người dùng kiểm tra lệnh rồi xác nhận để Inventor 2018 dựng hình.
 
-## JSON mẫu: dựng hình chữ nhật 150 × 70 × 8 mm
+## Quy trình
+1. Mở PDF2Inventor AI V0.6.
+2. Kéo thả PDF vào cửa sổ hoặc nhấn Mở PDF.
+3. Mở Inventor 2018, mở một file Part (.ipt) đã lưu. Nên dùng IPT mới/trống khi dựng chi tiết mới từ PDF.
+4. Trong tab AI đọc bản vẽ, nhấn Gắn IPT Inventor đang mở. Nếu chưa chọn chi tiết trong dự án, ứng dụng tạo một hồ sơ component và gắn với IPT đang mở.
+5. Nhập OpenAI API Key và nhấn Lưu cấu hình và khóa an toàn. Cấu hình model mặc định là gpt-4.1; có thể đổi tên model nếu tài khoản API được cấp quyền khác.
+6. Chọn mức chi tiết PDF (Cao cho bản vẽ cơ khí có kích thước nhỏ).
+7. Nhấn ĐỌC PDF VÀ PHÂN TÍCH. Ứng dụng gửi PDF tới OpenAI Responses API để AI đọc nội dung chữ và ảnh các trang.
+8. Đọc báo cáo: loại bản vẽ, hình chiếu, mặt cắt, kích thước đọc được, feature, độ tin cậy, câu hỏi và cảnh báo.
+9. Chỉ khi AI xác định được một hình dạng cơ bản phù hợp và không còn câu hỏi chưa giải quyết, nhấn Chuyển lệnh sang CAD.
+10. Trong tab Nhập lệnh CAD, nhấn Kiểm tra lệnh, đọc kích thước, sau đó nhấn Áp dụng lệnh và xác nhận. Inventor tạo backup trước khi thay đổi.
 
-Thay PROJECT_ID_THỰC_TẾ và COMPONENT_ID_THỰC_TẾ bằng đúng mã trong dự án đang mở.
+## Cấu hình API, chi phí và bảo mật
+- Phân tích tự động cần OpenAI API Key riêng. API được tính phí theo mức sử dụng, không dùng chung hạn mức ChatGPT Free/Plus.
+- Khóa được lưu mã hóa bằng Windows DPAPI theo tài khoản Windows hiện tại; khóa không được ghi thành văn bản thuần vào settings.json.
+- PDF được gửi qua HTTPS tới OpenAI API. Ứng dụng đặt store:false cho Responses API. Dù vậy, file vẫn được gửi ra ngoài máy để xử lý bởi dịch vụ API; không dùng chế độ AI tự động cho tài liệu mật nếu chưa được phép.
+- PDF đầu vào hiện giới hạn 50 MB cho mỗi file.
+- Có thể để trống khóa và tiếp tục dùng tab ChatGPT thủ công / nhập JSON như các bản trước.
+- Có thể dùng biến môi trường OPENAI_API_KEY thay cho lưu khóa trong ứng dụng.
 
-    {
-      "project_id": "PROJECT_ID_THỰC_TẾ",
-      "commands": [
-        {
-          "op": "create_rectangle_extrude",
-          "component_id": "COMPONENT_ID_THỰC_TẾ",
-          "length": 150,
-          "width": 70,
-          "thickness": 8,
-          "origin_x": 200,
-          "origin_y": 0,
-          "unit": "mm",
-          "operation": "auto",
-          "direction": "positive",
-          "reason": "Tạo khối chữ nhật kiểm thử"
-        }
-      ],
-      "questions": [],
-      "warnings": []
-    }
+## Phạm vi CAD tự động hiện có
+- Sửa tham số IPT.
+- Sketch chữ nhật + Extrude thành lăng trụ chữ nhật, kích thước có tham số.
+- Sketch tròn + Extrude thành khối trụ, đường kính có tham số.
+- Extrude Cut bằng lệnh hình tròn chỉ trong chế độ CAD thủ công và khi IPT đã có solid.
+- Tạo backup và yêu cầu xác nhận trước khi sửa IPT.
 
-origin_x và origin_y là vị trí góc đầu tiên tính từ gốc tọa độ XY, đơn vị mm. Trong ví dụ trên, hình được đặt tại X=200 mm để tránh chồng lên khối thử đang có tại gốc. Có thể dùng 0 nếu vùng đó còn trống hoặc muốn Join vào khối hiện tại.
+## Giới hạn quan trọng của AI trong V0.6
+- Bộ sinh lệnh tự động mới chỉ phát một feature cơ bản cho một chi tiết đơn: khối lăng trụ chữ nhật hoặc khối trụ.
+- Nếu bản vẽ có lỗ, rãnh, bậc, ren, mặt nghiêng, vát, bo, nhiều feature hoặc bản lắp nhiều chi tiết, AI phải trả câu hỏi/cảnh báo và không phát lệnh hình học đơn giản dễ gây sai chi tiết.
+- Chưa tự dựng một bản lắp hoàn chỉnh, chưa tạo native Hole, Fillet, Chamfer, Pattern, Thread hoặc bản vẽ 2D từ 3D.
+- Không suy kích thước từ tỷ lệ hình nếu không có kích thước tham chiếu; không tự giả định vật liệu, chiều dày, dung sai hoặc kích thước thiếu.
+- Mô hình AI có thể đọc sai nét/ký hiệu. Người dùng phải kiểm tra báo cáo và xem trước JSON trước khi xác nhận.
+- Việc build và kiểm thử tự động không thay thế kiểm thử hình học thực tế trên Inventor 2018. Cần thử trên IPT bản sao/trống trước.
 
-operation nhận auto, join hoặc new_body. direction nhận positive hoặc negative. Ba kích thước bắt buộc là số dương và unit bắt buộc là mm.
+## Kiểm thử CI
+- Compile tất cả module Python.
+- Import giao diện chính, module PDF AI và module Inventor geometry.
+- Unit tests cho Inventor COM bridge, validate lệnh hình học, schema AI và việc đóng gói lệnh.
+- GitHub Actions tự build EXE trên nhánh feature/v0.6-pdf-vision-auto.
 
+## Bản phát hành
+Khi workflow build thành công, tải artifact PDF2Inventor_AI_Windows_x64 ở trang Actions của repository.
 
-## JSON mẫu: khoét lỗ tròn đường kính 20 mm
-
-    {
-      "project_id": "PROJECT_ID_THỰC_TẾ",
-      "commands": [
-        {
-          "op": "create_circle_extrude",
-          "component_id": "COMPONENT_ID_THỰC_TẾ",
-          "diameter": 20,
-          "thickness": 8,
-          "center_x": 75,
-          "center_y": 35,
-          "unit": "mm",
-          "operation": "cut",
-          "direction": "positive",
-          "reason": "Khoét lỗ tròn kiểm thử"
-        }
-      ],
-      "questions": [],
-      "warnings": []
-    }
-
-Tâm hình tròn được xác định bởi center_x và center_y trong hệ tọa độ XY. Với operation=cut, Inventor dùng biên dạng tròn để cắt vào solid hiện có; chiều sâu cắt là thickness. Hãy kiểm tra vị trí và hướng cắt trước khi xác nhận.
-
-## Giới hạn V0.5
-- Tạo hình học hiện hỗ trợ một lệnh create_rectangle_extrude hoặc create_circle_extrude trong mỗi gói JSON; không trộn lệnh dựng hình với set_parameter trong cùng gói.
-- Hình chữ nhật dựng trên mặt phẳng XY gốc; chưa có chọn mặt phẳng hoặc mặt nghiêng.
-- Chưa hỗ trợ biên dạng tự do, native Hole Feature, Fillet, Chamfer, Pattern hoặc chỉnh sửa IAM. Lỗ tròn hiện tại được tạo bằng Sketch tròn + Extrude Cut, không phải native Hole Feature.
-- Không tự động nhận dạng kích thước PDF. Người dùng và ChatGPT cần xác định kích thước trước khi phát lệnh.
-- Join trong chế độ auto được ước lượng theo bounding box; nếu hình học thực không giao nhau, Inventor có thể từ chối Join và thông báo lỗi.
-- V0.5 cần được thử nghiệm trên Inventor 2018 thực tế. Kiểm thử CI xác nhận cấu trúc, validation và khả năng build; không thay thế kiểm thử CAD COM trên máy người dùng.
-- Bridge hiện làm việc với một file IPT đã liên kết và đang mở trong Inventor.
-
-## Cách sử dụng
-1. Mở Inventor 2018 và mở file IPT đã lưu.
-2. Mở PDF2Inventor AI V0.5.
-3. Trong tab Inventor 2018, nhấn Kết nối Inventor.
-4. Trong tab Dự án CAD, chọn chi tiết cần điều khiển.
-5. Trong tab Inventor 2018, nhấn Gắn IPT vào chi tiết.
-6. Nhấn Đồng bộ tham số để lấy dữ liệu mới nhất.
-7. Vào ChatGPT thủ công và tạo gói ngữ cảnh.
-8. Gửi ngữ cảnh cùng yêu cầu cho ChatGPT; nhập JSON trả về vào tab Nhập lệnh CAD.
-9. Nhấn Kiểm tra lệnh. Đọc kích thước và vị trí trước khi nhấn Áp dụng lệnh.
-10. Xác nhận thao tác trong hộp thoại. Sau khi hoàn tất, kiểm tra mô hình và nhật ký Inventor.
-
-## Build EXE
-GitHub Actions workflow Build PDF2Inventor AI for Windows tự chạy khi có commit trên nhánh feature/v0.5-sketch-extrude. Khi build thành công, tải artifact PDF2Inventor_AI_Windows_x64 trong trang Actions của GitHub.
-
-Người dùng cuối không cần cài Python. Máy build GitHub Actions cài Python, PySide6, PyMuPDF, pywin32 và PyInstaller.
-
-## An toàn và phát triển
-- Không sửa nhánh main; V0.5 phát triển riêng trên feature/v0.5-sketch-extrude, dựa trên nhánh V0.4 đã kiểm chứng kết nối Inventor.
-- Trước thao tác tham số/hình học, ứng dụng yêu cầu xác nhận.
-- Các thay đổi thật trên IPT tạo file backup bên cạnh file gốc.
-- Nếu tạo hình học thất bại, ứng dụng cố gắng hủy transaction và báo đường dẫn backup.
-- Chỉ phát hành EXE V0.5 sau khi kiểm thử tự động/build thành công và kiểm tra thực tế trên Inventor 2018.
+Nhánh V0.6 được phát triển tách riêng. Nhánh V0.4/V0.5 và main không bị ghi đè.
