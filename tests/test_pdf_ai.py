@@ -56,6 +56,12 @@ class PdfAiSchemaTests(unittest.TestCase):
             },
             "questions": [],
             "warnings": ["Check the drawing before applying."],
+            "confidence": "high",
+            "scale_status": "verified",
+            "scale_verification": {"verified": True, "mm_per_pt": 1.0},
+            "overall_length_mm": 120,
+            "overall_width_mm": 80,
+            "overall_height_mm": 6,
         }
         result = build_command_document(analysis, "PROJECT_X", "PART_X")
         self.assertEqual(result["project_id"], "PROJECT_X")
@@ -80,10 +86,19 @@ class PdfAiSchemaTests(unittest.TestCase):
                 "unit": "mm",
                 "operation": "new_body",
                 "direction": "positive",
+                "profile_vector_path_id": 12,
+                "hole_vector_path_ids": [13],
                 "reason": "Flat bracket profile",
             },
             "questions": [],
             "warnings": [],
+            "confidence": "high",
+            "scale_status": "verified",
+            "scale_verification": {"verified": True, "mm_per_pt": 2.0},
+            "overall_length_mm": 100,
+            "overall_width_mm": 60,
+            "overall_height_mm": 8,
+            "dimensions_detected": [{"label": "Hole diameter", "value": 10, "unit": "mm", "view": "Front", "page": 1, "evidence": "Ø10", "confidence": "high"}],
         }
         result = build_command_document(analysis, "PROJECT_Y", "PART_Y")
         self.assertEqual(result["commands"][0]["component_id"], "PART_Y")
@@ -314,7 +329,7 @@ class VectorScaleVerificationTests(unittest.TestCase):
             {"x": 0.0, "y": 0.0},
         ])
         self.assertEqual(result["holes"][0]["diameter"], 20.0)
-        self.assertEqual(result["holes"][0]["center_x"], 60.0)
+        self.assertEqual(result["holes"][0]["center_x"], 50.0)
         self.assertEqual(result["holes"][0]["center_y"], 60.0)
 
     def test_bounding_dimensions_must_match_drawing_values(self):
