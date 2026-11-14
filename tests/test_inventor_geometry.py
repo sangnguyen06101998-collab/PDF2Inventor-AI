@@ -1,7 +1,7 @@
 import unittest
 
 from inventor_bridge import InventorBridgeError
-from inventor_geometry import validate_rectangle_command, validate_circle_command
+from inventor_geometry import validate_rectangle_command, validate_circle_command, validate_profile_command
 
 
 class RectangleCommandValidationTests(unittest.TestCase):
@@ -107,6 +107,74 @@ class CircleCommandValidationTests(unittest.TestCase):
         command["operation"] = "blend"
         with self.assertRaises(InventorBridgeError):
             validate_circle_command(command)
+
+
+
+
+class ProfileCommandValidationTests(unittest.TestCase):
+    def valid_command(self):
+        return {
+            "op": "create_profile_extrude",
+            "unit": "mm",
+            "thickness": 8,
+            "direction": "positive",
+            "points": [
+                {"x": 0, "y": 0},
+                {"x": 100, "y": 0},
+                {"x": 100, "y": 50},
+                {"x": 0, "y": 50},
+            ],
+            "holes": [
+                {"center_x": 25, "center_y": 25, "diameter": 10},
+                {"center_x": 75, "center_y": 25, "diameter": 10},
+            ],
+        }
+
+    def test_valid_profile_with_round_holes(self):
+        result = validate_profile_command(self.valid_command())
+        self.assertEqual(len(result["points"]), 4)
+        self.assertEqual(len(result["holes"]), 2)
+        self.assertEqual(result["thickness"], 8)
+        self.assertEqual(result["holes"][0]["diameter"], 10)
+
+    def test_rejects_self_intersecting_profile(self):
+        command = self.valid_command()
+        command["holes"] = []
+        command["points"] = [
+            {"x": 0, "y": 0},
+            {"x": 100, "y": 50},
+            {"x": 0, "y": 50},
+            {"x": 100, "y": 0},
+        ]
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
+
+    def test_rejects_hole_outside_profile(self):
+        command = self.valid_command()
+        command["holes"] = [{"center_x": 150, "center_y": 25, "diameter": 10}]
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
+
+    def test_rejects_hole_intersecting_outer_edge(self):
+        command = self.valid_command()
+        command["holes"] = [{"center_x": 5, "center_y": 25, "diameter": 20}]
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
+
+    def test_rejects_overlapping_holes(self):
+        command = self.valid_command()
+        command["holes"] = [
+            {"center_x": 40, "center_y": 25, "diameter": 20},
+            {"center_x": 50, "center_y": 25, "diameter": 20},
+        ]
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
+
+    def test_rejects_missing_units(self):
+        command = self.valid_command()
+        command.pop("unit")
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
 
 
 if __name__ == "__main__":
