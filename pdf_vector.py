@@ -10,8 +10,8 @@ from pathlib import Path
 import fitz
 
 DIMENSION_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:Ø\\s*)?(?:R\\s*)?[-+]?\\d+(?:[.,]\\d+)?"
-    r"(?:\\s*(?:mm|毫米|cm|m|°))?(?![A-Za-z0-9])",
+    r"(?<![A-Za-z0-9])(?:Ø\s*)?(?:R\s*)?[-+]?\d+(?:[.,]\d+)?"
+    r"(?:\s*(?:mm|毫米|cm|m|°))?(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 
@@ -151,7 +151,7 @@ def format_analysis_summary(report):
             f"Vector: {page['vector_path_count']} · Ảnh: {page['embedded_image_count']}",
             "Kích thước đọc được: " + (", ".join(page["dimension_candidates"][:60]) or "Chưa tìm thấy")
         ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def save_analysis_report(report, output_path):
