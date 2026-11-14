@@ -193,7 +193,7 @@ def analysis_schema() -> dict[str, Any]:
         "operation": {"type": "string", "enum": ["auto", "new_body"]},
         "direction": {"type": "string", "enum": ["positive", "negative"]},
         "points": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
                 "type": "object",
                 "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
@@ -840,6 +840,24 @@ def analyze_pdf(
             geometry_issues.append(
                 "Chưa xác minh được tỷ lệ hình học vector: " + str(scale_verification.get("reason"))
             )
+        if command.get("op") == "create_profile_extrude":
+            try:
+                profile_path_id = command.get("profile_vector_path_id")
+                if profile_path_id is None:
+                    raise PdfAIError("AI chưa chỉ ra ID đường bao vector ngoài.")
+                if not scale_verification.get("verified"):
+                    raise PdfAIError("Không có tỷ lệ vector đã xác minh để chuyển tọa độ.")
+                derived_profile = derive_profile_from_vectors(
+                    vector_report,
+                    int(result.get("geometry_page")),
+                    int(profile_path_id),
+                    command.get("hole_vector_path_ids") or [],
+                    float(scale_verification["mm_per_pt"]),
+                )
+                command["points"] = derived_profile["points"]
+                command["holes"] = derived_profile["holes"]
+            except Exception as exc:
+                geometry_issues.append("Không chuyển được vector thành biên dạng CAD: " + str(exc))
         if result.get("confidence") != "high":
             geometry_issues.append("Độ tin cậy phân tích tổng thể chưa đạt mức cao.")
         geometry_issues.extend(validate_command_dimensions(result, command))
