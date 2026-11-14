@@ -613,122 +613,156 @@ def _page_path(vector_report: dict[str, Any], page_number: int, path_id: int) ->
     )
 
 
+def _vector_path_points_pt(path_record: dict[str, Any], mm_per_pt: float) -> list[tuple[float, float]]:
+    if not path_record.get("closed"):
+        raise PdfAIError("Path vector không được đánh dấu đóng kín.")
+    raw_segments = path_record.get("segments") or []
+    if not raw_segments:
+        raise PdfAIError("Path vector không có segment.")
+
+    if len(raw_segments) == 1 and raw_segments[0][0] == "R":
+        _, x0, y0, x1, y1, *_ = raw_segments[0]
+        return [
+            (float(x0), float(y0)),
+            (float(x1), float(y0)),
+            (float(x1), float(y1)),
+            (float(x0), float(y1)),
+        ]
+
+    points: list[tuple[float, float]] = []
+    previous_end: tuple[float, float] | None = None
+    for index, segment in enumerate(raw_segments):
+        if not isinstance(segment, list) or not segment:
+            raise PdfAIError(f"Segment vector {index + 1} không hợp lệ.")
+        kind = segment[0]
+        if kind == "L" and len(segment) == 5:
+            x1, y1, x2, y2 = [float(item) for item in segment[1:]]
+            start_point, end_point = (x1, y1), (x2, y2)
+            sampled = [end_point]
+        elif kind == "C" and len(segment) == 9:
+            x1, y1, cx1, cy1, cx2, cy2, x2, y2 = [float(item) for item in segment[1:]]
+            start_point, end_point = (x1, y1), (x2, y2)
+            control_length = (
+                math.dist(start_point, (cx1, cy1))
+                + math.dist((cx1, cy1), (cx2, cy2))
+                + math.dist((cx2, cy2), end_point)
+            ) * mm_per_pt
+            steps = max(8, min(48, int(math.ceil(control_length / 2.0))))
+            sampled = []
+            for step in range(1, steps + 1):
+                t = step / steps
+                u = 1.0 - t
+                px = (
+                    u**3 * x1 + 3 * u**2 * t * cx1
+                    + 3 * u * t**2 * cx2 + t**3 * x2
+                )
+                py = (
+                    u**3 * y1 + 3 * u**2 * t * cy1
+                    + 3 * u * t**2 * cy2 + t**3 * y2
+                )
+                sampled.append((px, py))
+        else:
+            raise PdfAIError(
+                f"Path vector chứa loại segment '{kind}' chưa được hỗ trợ cho biên dạng cơ khí."
+            )
+
+        if previous_end is None:
+            points.append(start_point)
+        elif math.dist(previous_end, start_point) > 0.05:
+            raise PdfAIError(
+                f"Đường bao vector bị đứt tại segment {index + 1}; phần mềm không tự nối đoán."
+            )
+        points.extend(sampled)
+        previous_end = end_point
+
+    if len(points) > 1 and math.dist(points[0], points[-1]) <= 0.05:
+        points.pop()
+    if len(points) < 3:
+        raise PdfAIError("Đường bao vector có ít hơn 3 điểm.")
+    if len(points) > 200:
+        raise PdfAIError("Đường cong vector cần hơn 200 điểm sau khi xấp xỉ; cần đơn giản hóa biên dạng.")
+    return points
+
+
+def _transform_profile_points(
+    points_pt: list[tuple[float, float]],
+    origin_x_pt: float,
+    origin_y_pt: float,
+    mm_per_pt: float,
+) -> list[dict[str, float]]:
+    return [
+        {
+            "x": round((x - origin_x_pt) * mm_per_pt, 4),
+            "y": round((origin_y_pt - y) * mm_per_pt, 4),
+        }
+        for x, y in points_pt
+    ]
+
+
 def derive_profile_from_vectors(
     vector_report: dict[str, Any],
     page_number: int,
     profile_path_id: int,
     hole_path_ids: list[int],
     mm_per_pt: float,
+    inner_path_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Convert a closed CAD-exported vector outline and circles to exact mm coordinates."""
+    """Convert CAD-exported vector outer/inner profiles into millimetre sketch coordinates."""
     if not math.isfinite(mm_per_pt) or mm_per_pt <= 0:
         raise PdfAIError("Tỷ lệ mm/point không hợp lệ.")
 
     profile_path = _page_path(vector_report, page_number, profile_path_id)
     if profile_path is None:
         raise PdfAIError("Không tìm thấy vector đường bao ngoài được AI chọn.")
-    if not profile_path.get("closed"):
-        raise PdfAIError("Đường bao vector ngoài không được đóng kín.")
-    raw_segments = profile_path.get("segments") or []
-    points_pt: list[tuple[float, float]] = []
-
-    # A single PDF rectangle operator is exact and can be expanded to four corners.
-    if len(raw_segments) == 1 and raw_segments[0][0] == "R":
-        _, x0, y0, x1, y1, *_ = raw_segments[0]
-        points_pt = [
-            (float(x0), float(y0)),
-            (float(x1), float(y0)),
-            (float(x1), float(y1)),
-            (float(x0), float(y1)),
-        ]
-    else:
-        for segment in raw_segments:
-            if not isinstance(segment, list) or len(segment) != 5 or segment[0] != "L":
-                raise PdfAIError(
-                    "Đường bao ngoài có cung cong/đoạn không thẳng. V0.6 hiện chỉ dựng đường bao bằng đoạn thẳng vector."
-                )
-        if len(raw_segments) < 3:
-            raise PdfAIError("Đường bao vector có ít hơn 3 cạnh.")
-        points_pt = [
-            (float(raw_segments[0][1]), float(raw_segments[0][2]))
-        ]
-        previous_end = points_pt[0]
-        for index, segment in enumerate(raw_segments):
-            start = (float(segment[1]), float(segment[2]))
-            end = (float(segment[3]), float(segment[4]))
-            if math.dist(previous_end, start) > 0.05:
-                raise PdfAIError(
-                    f"Đường bao vector không liên tục tại cạnh {index + 1}; không thể tự nối đoán."
-                )
-            if index < len(raw_segments) - 1:
-                points_pt.append(end)
-            previous_end = end
-        if math.dist(previous_end, points_pt[0]) > 0.05:
-            raise PdfAIError("Các đoạn vector không tạo thành một vòng kín.")
-
-    # Remove duplicate consecutive/closing vertices and collinear intermediate points.
-    cleaned: list[tuple[float, float]] = []
-    for point in points_pt:
-        if not cleaned or math.dist(cleaned[-1], point) > 0.05:
-            cleaned.append(point)
-    if len(cleaned) > 2 and math.dist(cleaned[0], cleaned[-1]) <= 0.05:
-        cleaned.pop()
-
-    changed = True
-    while changed and len(cleaned) > 3:
-        changed = False
-        for index in range(len(cleaned)):
-            a = cleaned[index - 1]
-            b = cleaned[index]
-            d = cleaned[(index + 1) % len(cleaned)]
-            cross = abs((b[0] - a[0]) * (d[1] - b[1]) - (b[1] - a[1]) * (d[0] - b[0]))
-            baseline = max(math.dist(a, b), math.dist(b, d), 1.0)
-            if cross <= baseline * 0.001:
-                cleaned.pop(index)
-                changed = True
-                break
-
-    if len(cleaned) < 3:
-        raise PdfAIError("Đường bao vector chỉ còn dưới 3 điểm sau khi loại bỏ điểm trùng.")
-
-    min_x = min(point[0] for point in cleaned)
-    max_y = max(point[1] for point in cleaned)
-    points_mm = [
-        {
-            "x": round((point[0] - min_x) * mm_per_pt, 4),
-            "y": round((max_y - point[1]) * mm_per_pt, 4),
-        }
-        for point in cleaned
-    ]
+    points_pt = _vector_path_points_pt(profile_path, mm_per_pt)
+    min_x = min(point[0] for point in points_pt)
+    max_y = max(point[1] for point in points_pt)
+    points_mm = _transform_profile_points(points_pt, min_x, max_y, mm_per_pt)
 
     holes = []
-    for index, hole_path_id in enumerate(hole_path_ids or [], 1):
-        hole_path = _page_path(vector_report, page_number, int(hole_path_id))
-        if hole_path is None:
-            raise PdfAIError(f"Không tìm thấy vector lỗ tròn số {index}.")
-        if not hole_path.get("closed") or not hole_path.get("has_circle_or_arc_candidate"):
-            raise PdfAIError(
-                f"Vector lỗ số {index} không được nhận dạng chắc chắn là đường tròn/đường cung kín."
-            )
-        bbox = hole_path.get("bbox_pt")
+    cutouts = []
+    all_inner_ids = list(dict.fromkeys(
+        [int(item) for item in (hole_path_ids or [])]
+        + [int(item) for item in (inner_path_ids or [])]
+    ))
+    for index, inner_path_id in enumerate(all_inner_ids, 1):
+        inner_path = _page_path(vector_report, page_number, inner_path_id)
+        if inner_path is None:
+            raise PdfAIError(f"Không tìm thấy vector lỗ/cửa sổ số {index}.")
+        if not inner_path.get("closed"):
+            raise PdfAIError(f"Vector lỗ/cửa sổ số {index} không khép kín.")
+        bbox = inner_path.get("bbox_pt")
         if not bbox or len(bbox) != 4:
-            raise PdfAIError(f"Không đọc được khung bao vector lỗ số {index}.")
-        hx0, hy0, hx1, hy1 = [float(value) for value in bbox]
-        width_pt, height_pt = hx1 - hx0, hy1 - hy0
+            raise PdfAIError(f"Không đọc được khung bao vector lỗ/cửa sổ số {index}.")
+        x0, y0, x1, y1 = [float(value) for value in bbox]
+        width_pt, height_pt = x1 - x0, y1 - y0
         if width_pt <= 0 or height_pt <= 0:
-            raise PdfAIError(f"Kích thước vector lỗ số {index} không hợp lệ.")
-        ratio_error = abs(width_pt - height_pt) / max(width_pt, height_pt)
-        if ratio_error > 0.02:
-            raise PdfAIError(f"Vector lỗ số {index} không đủ tròn (sai khác đường kính {ratio_error*100:.2f}%).")
-        center_x_pt, center_y_pt = (hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0
-        holes.append({
-            "center_x": round((center_x_pt - min_x) * mm_per_pt, 4),
-            "center_y": round((max_y - center_y_pt) * mm_per_pt, 4),
-            "diameter": round(((width_pt + height_pt) / 2.0) * mm_per_pt, 4),
-        })
+            raise PdfAIError(f"Kích thước vector lỗ/cửa sổ số {index} không hợp lệ.")
 
-    return {"points": points_mm, "holes": holes}
+        if inner_path.get("has_circle_or_arc_candidate"):
+            ratio_error = abs(width_pt - height_pt) / max(width_pt, height_pt)
+            if ratio_error > 0.02:
+                raise PdfAIError(
+                    f"Vector lỗ tròn số {index} không đủ tròn (sai khác đường kính {ratio_error*100:.2f}%)."
+                )
+            center_x_pt, center_y_pt = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            holes.append({
+                "center_x": round((center_x_pt - min_x) * mm_per_pt, 4),
+                "center_y": round((max_y - center_y_pt) * mm_per_pt, 4),
+                "diameter": round(((width_pt + height_pt) / 2.0) * mm_per_pt, 4),
+            })
+        else:
+            inner_points_pt = _vector_path_points_pt(inner_path, mm_per_pt)
+            cutouts.append(_transform_profile_points(inner_points_pt, min_x, max_y, mm_per_pt))
 
+    return {
+        "points": points_mm,
+        "holes": holes,
+        "cutouts": cutouts,
+        "curves_approximated": sum(
+            1 for segment in profile_path.get("segments", []) if segment and segment[0] == "C"
+        ),
+    }
 
 def analyze_pdf(
     pdf_path: str,
