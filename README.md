@@ -9,7 +9,7 @@
 
 ## Inventor 2018 native feature operations currently implemented
 - Rectangle and circle Sketch + Extrude/Cut.
-- create_profile_extrude: custom closed polyline/circle loops on XY, XZ or YZ origin planes, including offset_mm parallel planes, then Extrude/Join/New Body/Cut.
+- create_profile_extrude: custom closed polyline/circle/line-and-arc loops on XY, XZ or YZ origin planes, including offset_mm parallel planes, then Extrude/Join/New Body/Cut.
 - create_hole: native drilled Hole feature with multiple sketch-point locations, through-all or blind depth.
 - create_thread: native standard thread on an existing cylindrical face using Inventor thread-table designation.
 - create_fillet: native constant-radius Fillet on explicit 1-based edge indices.
@@ -30,12 +30,14 @@
     }
 
 ## Fillet / Chamfer
+- Native hole: op=create_hole, plane=XY, offset_mm=12, centers=[[20,20],[80,20]], diameter=8, extent=through_all, unit=mm.
+- Standard thread: op=create_thread, face_index=2, start_edge_index=1, designation=M8x1.25, thread_type=ISO Metric Profile, thread_class=6H, internal=true, full_depth=true, unit=mm.
 - Fillet: op=create_fillet, edge_indices=[1,2], radius=2, unit=mm.
 - Chamfer: op=create_chamfer, edge_indices=[3], distance=1, unit=mm.
 
 ## Pattern
 - Circular: op=create_circular_pattern, feature_names=["Hole1"], axis_index=3, count=6, angle_deg=360, unit=mm.
-- Rectangular (one direction): op=create_rectangular_pattern, feature_names=["Rib1"], axis_index=1, count=4, spacing_mm=25, unit=mm.
+- Rectangular (one or two directions): op=create_rectangular_pattern, feature_names=["Rib1"], axis_index=1, count=4, spacing_mm=25, count_y=3, axis_y_index=2, spacing_y_mm=30, unit=mm.
 
 ## IAM assembly
 - op=create_assembly_iam, output_path='C:/CAD/Assembly.iam'.
