@@ -202,10 +202,10 @@ def analysis_schema() -> dict[str, Any]:
             },
         },
         "profile_vector_path_id": {"type": ["integer", "null"]},
-        "hole_vector_path_ids": {"type": "array", "items": {"type": "integer"}},
-        "inner_vector_path_ids": {"type": "array", "items": {"type": "integer"}},
+        "hole_vector_path_ids": {"type": ["array", "null"], "items": {"type": "integer"}},
+        "inner_vector_path_ids": {"type": ["array", "null"], "items": {"type": "integer"}},
         "cutouts": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
                 "type": "array",
                 "items": {
@@ -217,7 +217,7 @@ def analysis_schema() -> dict[str, Any]:
             },
         },
         "holes": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
                 "type": "object",
                 "properties": {
