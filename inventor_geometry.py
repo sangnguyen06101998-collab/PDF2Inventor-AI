@@ -311,3 +311,191 @@ def create_rectangle_extrude(document, inventor_app, command):
             f"Không tạo được Sketch/Extrude: {detail}. {rollback_message} "
             f"Backup: {backup}"
         ) from exc
+
+
+def validate_circle_command(command):
+    """Validate a circle extrusion/cut command without connecting to COM."""
+    if not isinstance(command, dict) or command.get("op") != "create_circle_extrude":
+        raise InventorBridgeError("Lệnh hình tròn phải dùng op='create_circle_extrude'.")
+    if command.get("unit") != "mm":
+        raise InventorBridgeError("V0.5 yêu cầu unit='mm' cho lệnh Sketch tròn/Extrude.")
+    diameter = _number(command.get("diameter"), "diameter", positive=True)
+    thickness = _number(command.get("thickness"), "thickness", positive=True)
+    center_x = _number(command.get("center_x", 0), "center_x")
+    center_y = _number(command.get("center_y", 0), "center_y")
+    direction = str(command.get("direction", "positive")).strip().lower()
+    if direction not in {"positive", "negative"}:
+        raise InventorBridgeError("direction chỉ nhận positive hoặc negative.")
+    operation = str(command.get("operation", "auto")).strip().lower()
+    if operation not in {"auto", "join", "new_body", "cut"}:
+        raise InventorBridgeError("operation chỉ nhận auto, join, new_body hoặc cut.")
+    parameter_names = command.get("parameter_names") or {}
+    if not isinstance(parameter_names, dict):
+        raise InventorBridgeError("parameter_names phải là một đối tượng JSON.")
+    names = {}
+    for key, default in (("diameter", "Diameter"), ("thickness", "Thickness")):
+        name = str(parameter_names.get(key, default)).strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise InventorBridgeError("Tên tham số không hợp lệ: " + name)
+        names[key] = name
+    if len(set(names.values())) != 2:
+        raise InventorBridgeError("Tên Diameter và Thickness phải khác nhau.")
+    return {
+        "diameter": diameter,
+        "thickness": thickness,
+        "center_x": center_x,
+        "center_y": center_y,
+        "direction": direction,
+        "operation": operation,
+        "parameter_names": names,
+        "unit": "mm",
+    }
+
+
+def create_circle_extrude(document, inventor_app, command):
+    """Create a dimensioned XY circle and extrude it or cut it in an existing IPT."""
+    cfg = validate_circle_command(command)
+    info = get_document_info(document, inventor_app)
+    file_path = info.get("full_path", "")
+    if not file_path or Path(file_path).suffix.lower() != ".ipt" or not os.path.isfile(file_path):
+        raise InventorBridgeError("Lệnh Sketch tròn chỉ chạy trên file .ipt đã lưu và tồn tại.")
+
+    try:
+        document.Save()
+    except Exception as exc:
+        raise InventorBridgeError("Không lưu được IPT trước khi tạo backup: " + str(exc)) from exc
+    source = Path(file_path)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = source.with_name(source.stem + "_Before_PDF2Inventor_V05_" + stamp + source.suffix)
+    try:
+        shutil.copy2(source, backup)
+    except Exception as exc:
+        raise InventorBridgeError("Không tạo được bản sao dự phòng: " + str(exc)) from exc
+
+    transaction = None
+    save_attempted = False
+    try:
+        transaction = inventor_app.TransactionManager.StartTransaction(
+            document, "PDF2Inventor V0.5 - Circle Extrude"
+        )
+        component = document.ComponentDefinition
+        all_parameters = component.Parameters
+        user_parameters = all_parameters.UserParameters
+        actual_names = {
+            key: _unique_parameter_name(all_parameters, requested)
+            for key, requested in cfg["parameter_names"].items()
+        }
+        user_parameters.AddByExpression(
+            actual_names["diameter"], str(cfg["diameter"]) + " mm", "mm"
+        )
+        user_parameters.AddByExpression(
+            actual_names["thickness"], str(cfg["thickness"]) + " mm", "mm"
+        )
+
+        geometry = inventor_app.TransientGeometry
+        sketch = component.Sketches.Add(component.WorkPlanes.Item(3))
+        cx = cfg["center_x"] / 10.0
+        cy = cfg["center_y"] / 10.0
+        radius = cfg["diameter"] / 20.0
+        center = sketch.SketchPoints.Add(geometry.CreatePoint2d(cx, cy), False)
+        circle = sketch.SketchCircles.AddByCenterRadius(center, radius)
+        sketch.GeometricConstraints.AddGround(center)
+        diameter_dimension = sketch.DimensionConstraints.AddDiameter(
+            circle, geometry.CreatePoint2d(cx + radius + max(0.5, radius * 0.2), cy), False
+        )
+        diameter_dimension.Parameter.Expression = actual_names["diameter"]
+
+        profile = sketch.Profiles.AddForSolid()
+        try:
+            body_count = int(component.SurfaceBodies.Count)
+        except Exception:
+            body_count = 0
+        operation = cfg["operation"]
+        if operation == "auto":
+            operation = "new_body"
+            current_box = _range_box_mm(component)
+            if body_count > 0 and current_box:
+                existing_min = current_box["min_mm"]
+                existing_max = current_box["max_mm"]
+                z_min = 0.0 if cfg["direction"] == "positive" else -cfg["thickness"]
+                z_max = cfg["thickness"] if cfg["direction"] == "positive" else 0.0
+                new_min = [
+                    cfg["center_x"] - cfg["diameter"] / 2.0,
+                    cfg["center_y"] - cfg["diameter"] / 2.0,
+                    z_min,
+                ]
+                new_max = [
+                    cfg["center_x"] + cfg["diameter"] / 2.0,
+                    cfg["center_y"] + cfg["diameter"] / 2.0,
+                    z_max,
+                ]
+                overlaps = all(
+                    min(existing_max[i], new_max[i]) - max(existing_min[i], new_min[i]) > 1e-6
+                    for i in range(3)
+                )
+                if overlaps:
+                    operation = "join"
+        if operation in {"join", "cut"} and body_count == 0:
+            raise InventorBridgeError(
+                "operation=" + operation + " nhưng IPT chưa có solid body. Hãy tạo solid trước."
+            )
+        operation_enum = {
+            "join": K_JOIN_OPERATION,
+            "new_body": K_NEW_BODY_OPERATION,
+            "cut": K_CUT_OPERATION,
+        }[operation]
+        direction_enum = (
+            K_POSITIVE_EXTENT_DIRECTION
+            if cfg["direction"] == "positive"
+            else K_NEGATIVE_EXTENT_DIRECTION
+        )
+        extrudes = component.Features.ExtrudeFeatures
+        definition = extrudes.CreateExtrudeDefinition(profile, operation_enum)
+        definition.SetDistanceExtent(actual_names["thickness"], direction_enum)
+        extrude = extrudes.Add(definition)
+        try:
+            sketch.Visible = False
+            sketch.Name = "P2I_Circle_Sketch"
+            extrude.Name = "P2I_Circle_Extrude"
+        except Exception:
+            pass
+        document.Update()
+        save_attempted = True
+        document.Save()
+        transaction.End()
+        transaction = None
+        return {
+            "document_path": file_path,
+            "backup_path": str(backup),
+            "sketch_name": str(getattr(sketch, "Name", "P2I_Circle_Sketch")),
+            "feature_name": str(getattr(extrude, "Name", "P2I_Circle_Extrude")),
+            "operation": operation,
+            "direction": cfg["direction"],
+            "dimensions_mm": {
+                "diameter": cfg["diameter"],
+                "thickness": cfg["thickness"],
+                "center_x": cfg["center_x"],
+                "center_y": cfg["center_y"],
+            },
+            "parameter_names": actual_names,
+            "parameters": read_parameters(document),
+            "range_box": _range_box_mm(component),
+        }
+    except Exception as exc:
+        rollback_message = ""
+        if transaction is not None:
+            try:
+                transaction.Abort()
+                rollback_message = "Đã hủy transaction hình học trong Inventor."
+            except Exception as abort_exc:
+                rollback_message = "Không xác nhận được rollback transaction: " + str(abort_exc)
+        if save_attempted:
+            try:
+                shutil.copy2(backup, file_path)
+                rollback_message += " Đã khôi phục file trên ổ đĩa từ backup; hãy đóng IPT không lưu rồi mở lại."
+            except Exception as restore_exc:
+                rollback_message += " Không thể khôi phục file tự động: " + str(restore_exc)
+        detail = str(exc) if isinstance(exc, InventorBridgeError) else type(exc).__name__ + ": " + str(exc)
+        raise InventorBridgeError(
+            "Không tạo được Sketch tròn/Extrude: " + detail + ". " + rollback_message + " Backup: " + str(backup)
+        ) from exc
