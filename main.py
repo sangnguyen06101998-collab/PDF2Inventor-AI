@@ -461,6 +461,13 @@ class MainWindow(QMainWindow):
                         validate_rectangle_command(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_circle_extrude":
+                    if not comp.get("inventor_file"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_circle_command(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
                 else:
                     issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.5.")
             if not commands and not data.get("questions"):
