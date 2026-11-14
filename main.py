@@ -10,7 +10,11 @@ from PySide6.QtWidgets import (
     QGroupBox, QLineEdit, QTabWidget, QInputDialog, QDialog, QComboBox
 )
 from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
-from inventor_geometry import create_rectangle_extrude, validate_rectangle_command, create_circle_extrude, validate_circle_command
+from inventor_geometry import (
+    create_rectangle_extrude, validate_rectangle_command,
+    create_circle_extrude, validate_circle_command,
+    create_profile_extrude, validate_profile_command
+)
 from pdf_ai import (
     PdfAIError, analyze_pdf, build_command_document, format_analysis_report,
     get_api_key, load_settings, save_settings, DEFAULT_MODEL
@@ -538,7 +542,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("V0.5 hỗ trợ set_parameter, Sketch chữ nhật/tròn, Extrude và Extrude Cut. Chưa hỗ trợ Fillet, Chamfer hoặc IAM.")
+        warning = QLabel("V0.6 hỗ trợ AI đọc PDF và dựng lăng trụ cơ bản bằng Sketch chữ nhật/tròn/biên dạng đa giác có lỗ tròn. Chưa hỗ trợ đầy đủ chi tiết có nhiều feature hoặc IAM.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -860,7 +864,7 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude"}]
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"}]
             if geometry_commands and len(commands) != 1:
                 issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
             for i, cmd in enumerate(commands, 1):
@@ -892,6 +896,13 @@ class MainWindow(QMainWindow):
                         issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
                     try:
                         validate_circle_command(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_profile_extrude":
+                    if not comp.get("inventor_file"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_profile_command(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
                 else:
@@ -930,7 +941,7 @@ class MainWindow(QMainWindow):
             targets.append((comp, cmd))
 
         # Geometry operations are intentionally a single-command transaction in V0.5.
-        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude"}:
+        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
             try:
@@ -945,10 +956,19 @@ class MainWindow(QMainWindow):
                     f'Dài X: {cmd["length"]} mm · Rộng Y: {cmd["width"]} mm · '
                     f'Đùn Z: {cmd["thickness"]} mm · Gốc: ({cmd.get("origin_x", 0)}, {cmd.get("origin_y", 0)}) mm'
                 )
-            else:
+            elif cmd["op"] == "create_circle_extrude":
                 dims = (
                     f'Đường kính: {cmd["diameter"]} mm · Đùn/Cắt Z: {cmd["thickness"]} mm · '
                     f'Tâm: ({cmd.get("center_x", 0)}, {cmd.get("center_y", 0)}) mm'
+                )
+            else:
+                profile_points = cmd.get("points") or []
+                xs = [float(point["x"]) for point in profile_points]
+                ys = [float(point["y"]) for point in profile_points]
+                dims = (
+                    f'Biên dạng: {len(profile_points)} điểm · Lỗ tròn: {len(cmd.get("holes") or [])} · '
+                    f'Kích thước bao: {max(xs)-min(xs):.2f} × {max(ys)-min(ys):.2f} mm · '
+                    f'Dày: {cmd["thickness"]} mm'
                 )
             intro = (
                 "Sẽ tạo hình học thật trong Inventor 2018: " + str(path) + "\n" +
@@ -960,8 +980,10 @@ class MainWindow(QMainWindow):
             try:
                 if cmd["op"] == "create_rectangle_extrude":
                     result = create_rectangle_extrude(doc, self.inventor_app, cmd)
-                else:
+                elif cmd["op"] == "create_circle_extrude":
                     result = create_circle_extrude(doc, self.inventor_app, cmd)
+                else:
+                    result = create_profile_extrude(doc, self.inventor_app, cmd)
                 comp["parameters"] = copy.deepcopy(result["parameters"])
                 self.project["change_history"].append({
                     "timestamp": now(),
