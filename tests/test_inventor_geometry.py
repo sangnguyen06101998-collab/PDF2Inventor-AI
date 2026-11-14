@@ -70,6 +70,56 @@ class RectangleCommandValidationTests(unittest.TestCase):
 
 
 
+class ProfileCutoutValidationTests(unittest.TestCase):
+    def valid_command(self):
+        return {
+            "op": "create_profile_extrude",
+            "unit": "mm",
+            "thickness": 8,
+            "direction": "positive",
+            "points": [
+                {"x": 0, "y": 0},
+                {"x": 100, "y": 0},
+                {"x": 100, "y": 60},
+                {"x": 0, "y": 60},
+            ],
+            "holes": [],
+            "cutouts": [[
+                {"x": 40, "y": 20},
+                {"x": 60, "y": 20},
+                {"x": 60, "y": 40},
+                {"x": 40, "y": 40},
+            ]],
+        }
+
+    def test_accepts_inner_polygon_cutout(self):
+        result = validate_profile_command(self.valid_command())
+        self.assertEqual(len(result["cutouts"]), 1)
+        self.assertEqual(len(result["cutouts"][0]), 4)
+
+    def test_rejects_cutout_outside_outer_profile(self):
+        command = self.valid_command()
+        command["cutouts"] = [[
+            {"x": 90, "y": 20},
+            {"x": 110, "y": 20},
+            {"x": 110, "y": 40},
+            {"x": 90, "y": 40},
+        ]]
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
+
+    def test_rejects_overlapping_cutouts(self):
+        command = self.valid_command()
+        command["cutouts"].append([
+            {"x": 50, "y": 30},
+            {"x": 70, "y": 30},
+            {"x": 70, "y": 50},
+            {"x": 50, "y": 50},
+        ])
+        with self.assertRaises(InventorBridgeError):
+            validate_profile_command(command)
+
+
 class CircleCommandValidationTests(unittest.TestCase):
     def valid_command(self):
         return {
