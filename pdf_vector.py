@@ -28,6 +28,7 @@ MAX_PAGES_FOR_VECTOR_DETAILS = 20
 MAX_PATHS_PER_PAGE = 320
 MAX_TOTAL_PATHS = 1200
 MAX_SPANS_PER_PAGE = 900
+MAX_SEGMENTS_PER_PATH = 160
 MAX_REPORT_CHARS = 180_000
 
 
@@ -72,7 +73,7 @@ def _quad(value: Any) -> list[list[float]] | None:
 
 def _path_items(path: dict[str, Any]) -> list[list[Any]]:
     converted = []
-    for item in path.get("items", []) or []:
+    for item in (path.get("items", []) or [])[:MAX_SEGMENTS_PER_PATH]:
         if not item:
             continue
         kind = item[0]
@@ -125,6 +126,7 @@ def _path_record(index: int, path: dict[str, Any]) -> dict[str, Any] | None:
         "size_pt": [round(width, 3), round(height, 3)],
         "closed": bool(path.get("closePath", False)),
         "segment_count": len(segments),
+        "segments_truncated": len(path.get("items", []) or []) > MAX_SEGMENTS_PER_PATH,
         "has_curve": any(segment[0] == "C" for segment in segments),
         "has_circle_or_arc_candidate": (
             bool(path.get("closePath", False))
@@ -187,6 +189,7 @@ def extract_pdf_vector_report(pdf_path: str) -> dict[str, Any]:
         total_spans = 0
         total_images = 0
         total_vector_segments = 0
+        total_saved_paths = 0
         detail_page_count = min(document.page_count, MAX_PAGES_FOR_VECTOR_DETAILS)
 
         for page_index in range(document.page_count):
@@ -202,11 +205,21 @@ def extract_pdf_vector_report(pdf_path: str) -> dict[str, Any]:
             total_spans += len(spans)
 
             records = []
-            if page_index < detail_page_count:
+            remaining_path_budget = max(0, MAX_TOTAL_PATHS - total_saved_paths)
+            if page_index < detail_page_count and remaining_path_budget:
                 for path_index, path_data in enumerate(raw_drawings):
                     record = _path_record(path_index, path_data)
                     if record is not None:
                         records.append(record)
+                records.sort(
+                    key=lambda item: (
+                        (item["size_pt"][0] * item["size_pt"][1]),
+                        item["segment_count"],
+                    ),
+                    reverse=True,
+                )
+                records = records[:min(MAX_PATHS_PER_PAGE, remaining_path_budget)]
+                total_saved_paths += len(records)
             records.sort(
                 key=lambda item: (
                     (item["size_pt"][0] * item["size_pt"][1]),
@@ -238,6 +251,7 @@ def extract_pdf_vector_report(pdf_path: str) -> dict[str, Any]:
             "source_file": path.name,
             "page_count": document.page_count,
             "total_path_count": total_paths,
+            "total_saved_vector_path_count": total_saved_paths,
             "total_vector_segment_count": total_vector_segments,
             "total_text_span_count": total_spans,
             "total_embedded_image_count": total_images,
