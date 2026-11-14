@@ -1,7 +1,9 @@
 # PDF2Inventor AI V0.6 · PDF Vision → Inventor 2018
 
 ## Mục tiêu V0.6
-Nạp bản vẽ PDF trực tiếp vào phần mềm, để AI thị giác đọc hình chiếu/mặt cắt/kích thước, tạo báo cáo và đề xuất lệnh CAD có cấu trúc. Người dùng kiểm tra lệnh rồi xác nhận để Inventor 2018 dựng hình.
+Nạp PDF trực tiếp vào phần mềm. Ứng dụng trích vector CAD/text gốc, AI thị giác đọc hình chiếu/mặt cắt/kích thước, kiểm tra tỷ lệ và đề xuất lệnh CAD. Người dùng xác nhận để Inventor 2018 dựng hình.
+
+Kích thước số ghi trên bản vẽ là chuẩn cuối cùng; tỷ lệ vector chỉ dùng để hiệu chuẩn tọa độ và kiểm tra chéo.
 
 ## Quy trình
 1. Mở PDF2Inventor AI V0.6.
@@ -27,14 +29,17 @@ Nạp bản vẽ PDF trực tiếp vào phần mềm, để AI thị giác đọ
 - Sửa tham số IPT.
 - Sketch chữ nhật + Extrude thành lăng trụ chữ nhật, kích thước có tham số.
 - Sketch tròn + Extrude thành khối trụ, đường kính có tham số.
-- Sketch biên dạng đa giác kín + Extrude, hỗ trợ lỗ tròn xuyên suốt có đường kính điều khiển.
+- Sketch biên dạng vector kín + Extrude, hỗ trợ lỗ tròn, cửa sổ/rãnh kín đa giác.
+- Đường cong Bezier trên biên dạng ngoài được xấp xỉ bằng các đoạn thẳng ngắn lấy từ vector PDF; không thay thế cung/fillet CAD native.
 - Extrude Cut bằng lệnh hình tròn chỉ trong chế độ CAD thủ công và khi IPT đã có solid.
 - Tạo backup và yêu cầu xác nhận trước khi sửa IPT.
 
 ## Giới hạn quan trọng của AI trong V0.6
-- Bộ sinh lệnh tự động phát một feature cho một chi tiết đơn: lăng trụ chữ nhật, khối trụ, hoặc biên dạng đa giác phẳng có lỗ tròn xuyên suốt rồi Extrude.
-- Các biên dạng đa giác chỉ dùng cạnh thẳng; lỗ tròn phải có đường kính/tọa độ tâm đọc được rõ ràng.
-- Nếu bản vẽ có lỗ bậc, rãnh không tròn, bậc chiều sâu, ren, mặt nghiêng 3D, vát, bo, nhiều feature hoặc bản lắp nhiều chi tiết, AI phải trả câu hỏi/cảnh báo và không phát lệnh hình học đơn giản dễ gây sai chi tiết.
+- Bộ sinh lệnh tự động phát một feature cho một chi tiết đơn: lăng trụ chữ nhật, khối trụ, hoặc biên dạng vector phẳng có lỗ/cửa sổ xuyên suốt rồi Extrude.
+- AI phải chỉ ra ít nhất một chuẩn vector theo X và một chuẩn theo Y trên cùng hình chiếu. Ứng dụng tự tính lại mm/point từ đoạn thẳng PDF và yêu cầu sai khác tỷ lệ không quá 2%.
+- Kích thước bao lệnh CAD được đối chiếu với ba kích thước tổng thể Dài/Rộng/Cao; sai số tối đa 0.1% hoặc 0.05 mm, lấy giá trị lớn hơn.
+- Đường bao vector có thể gồm cạnh thẳng và cung Bezier được lấy mẫu thành đoạn thẳng ngắn; lỗ tròn được tạo thành đường tròn Sketch thực, cửa sổ/rãnh kín được tạo từ vòng Sketch bên trong.
+- Nếu bản vẽ có lỗ bậc, rãnh hở, bậc chiều sâu, ren, mặt nghiêng 3D, vát/bo cần feature riêng, nhiều feature độc lập hoặc bản lắp nhiều chi tiết, AI phải trả câu hỏi/cảnh báo và không phát lệnh hình học đơn giản dễ gây sai chi tiết.
 - Chưa tự dựng một bản lắp hoàn chỉnh, chưa tạo native Hole, Fillet, Chamfer, Pattern, Thread hoặc bản vẽ 2D từ 3D.
 - Không suy kích thước từ tỷ lệ hình nếu không có kích thước tham chiếu; không tự giả định vật liệu, chiều dày, dung sai hoặc kích thước thiếu.
 - Mô hình AI có thể đọc sai nét/ký hiệu. Người dùng phải kiểm tra báo cáo và xem trước JSON trước khi xác nhận.
