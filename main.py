@@ -10,8 +10,9 @@ from PySide6.QtWidgets import (
     QGroupBox, QLineEdit, QTabWidget, QInputDialog, QDialog
 )
 from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
+from inventor_geometry import create_rectangle_extrude, validate_rectangle_command
 
-APP_TITLE = "PDF2Inventor AI · V0.4 Inventor COM"
+APP_TITLE = "PDF2Inventor AI · V0.5 Sketch + Extrude"
 SCHEMA_VERSION = "0.2"
 
 def now():
@@ -29,7 +30,7 @@ def default_project():
         "change_history": [],
         "notes": [
             "Chỉ đưa cho ChatGPT thông tin cần thiết; không gửi PDF nếu không cần.",
-            "V0.4 có thể cập nhật tham số của file IPT đã liên kết; lệnh phải được xác nhận trước khi áp dụng."
+            "V0.5 hỗ trợ cập nhật tham số và dựng Sketch chữ nhật + Extrude trên IPT đã liên kết; mọi lệnh phải được xác nhận trước khi áp dụng."
         ]
     }
 
@@ -61,7 +62,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.build_command_tab(), "Nhập lệnh CAD")
         self.tabs = tabs
         self.refresh_project_view()
-        self.statusBar().showMessage("V0.4 PORTABLE · Inventor 2018 COM · FREE MODE")
+        self.statusBar().showMessage("V0.5 PORTABLE · Inventor 2018 COM · FREE MODE")
 
     def build_project_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
@@ -90,7 +91,7 @@ class MainWindow(QMainWindow):
         rl.addWidget(self.project_view)
         split.addWidget(left); split.addWidget(right); split.setSizes([350, 850])
         root.addWidget(split, 1)
-        note = QLabel("V0.4: tham số của IPT đã liên kết có thể được cập nhật sau khi người dùng xác nhận lệnh.")
+        note = QLabel("V0.5: cập nhật tham số và tạo Sketch chữ nhật + Extrude trên IPT đã liên kết sau khi người dùng xác nhận.")
         note.setStyleSheet("color:#b45309;")
         root.addWidget(note)
         return w
@@ -141,7 +142,7 @@ class MainWindow(QMainWindow):
 
     def build_command_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
-        root.addWidget(QLabel("Nhập JSON do ChatGPT tạo. Ứng dụng sẽ kiểm tra mã chi tiết, tên tham số, đơn vị và giá trị trước khi ghi vào hồ sơ dự án."))
+        root.addWidget(QLabel("Nhập JSON do ChatGPT tạo. Ứng dụng kiểm tra mã chi tiết, tham số, kích thước, đơn vị và loại thao tác trước khi sửa IPT."))
         row = QHBoxLayout()
         loadb = QPushButton("Chọn tệp JSON"); loadb.clicked.connect(self.import_commands)
         validate = QPushButton("Kiểm tra lệnh"); validate.clicked.connect(self.validate_commands)
@@ -154,7 +155,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("V0.4 chỉ sửa tham số của IPT đã liên kết; chưa tạo Sketch/Extrude/Hole mới hoặc chỉnh sửa IAM.")
+        warning = QLabel("V0.5 hỗ trợ set_parameter và create_rectangle_extrude (Sketch chữ nhật có ràng buộc + Extrude). Chưa hỗ trợ Hole, Fillet, Chamfer hoặc IAM.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -162,7 +163,7 @@ class MainWindow(QMainWindow):
 
     def build_inventor_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
-        label = QLabel("Mở một file IPT trong Inventor 2018, sau đó kết nối để đọc tham số và liên kết với chi tiết trong dự án.")
+        label = QLabel("Mở một file IPT đã lưu trong Inventor 2018, kết nối để đọc tham số và liên kết với chi tiết. V0.5 có thể dựng Sketch chữ nhật và Extrude trực tiếp trên IPT này.")
         label.setWordWrap(True); root.addWidget(label)
         self.inv_status = QLabel("Chưa kết nối Inventor.")
         root.addWidget(self.inv_status)
@@ -351,7 +352,7 @@ class MainWindow(QMainWindow):
     def build_context_text(self):
         self.update_project_name()
         context = {
-            "purpose": "Hiểu dự án CAD và đề xuất lệnh sửa tham số. Không tự giả định kích thước còn thiếu.",
+            "purpose": "Hiểu dự án CAD và tạo lệnh sửa tham số hoặc dựng hình học cơ bản trong Inventor 2018. Không tự giả định kích thước còn thiếu.",
             "project": self.project,
             "command_schema": {
                 "project_id": self.project["project_id"],
@@ -365,17 +366,33 @@ class MainWindow(QMainWindow):
                 }],
                 "questions": [],
                 "warnings": []
+            },
+            "geometry_command_schema": {
+                "op": "create_rectangle_extrude",
+                "component_id": "MÃ_CHI_TIẾT_CÓ_IPT_ĐÃ_GẮN",
+                "length": 150,
+                "width": 70,
+                "thickness": 8,
+                "origin_x": 0,
+                "origin_y": 0,
+                "unit": "mm",
+                "operation": "auto",
+                "direction": "positive",
+                "reason": "Tạo khối chữ nhật kiểm thử"
             }
         }
         instruction = (
-            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor AI, Inventor 2018. "
-            "Đọc hồ sơ JSON bên dưới và yêu cầu sửa của người dùng. "
-            "Chỉ tạo lệnh set_parameter nếu component_id và parameter tồn tại chính xác trong hồ sơ. "
-            "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. "
-            "Nếu mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
+            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor AI V0.5, Autodesk Inventor 2018. "
+            "Đọc hồ sơ JSON bên dưới và yêu cầu của người dùng. "
+            "Với set_parameter, chỉ dùng component_id và parameter có sẵn trong hồ sơ. "
+            "Với create_rectangle_extrude, tạo một Sketch chữ nhật trên mặt phẳng XY và Extrude; bắt buộc có length, width, thickness và unit=mm. "
+            "origin_x và origin_y tính từ gốc tọa độ, mặc định 0 mm nếu người dùng không chỉ định. "
+            "operation chỉ được dùng auto, join hoặc new_body; direction chỉ được dùng positive hoặc negative. "
+            "Mỗi gói JSON chỉ dùng một chế độ: set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh create_rectangle_extrude. Không trộn hai loại lệnh. "
+            "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "Không tạo lệnh xóa feature hoặc thay đổi hình học topo ở chế độ này."
+            "Không tạo Hole, Fillet, Chamfer, Cut hoặc xóa Feature trong V0.5."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
@@ -416,24 +433,41 @@ class MainWindow(QMainWindow):
         try:
             data = self.parse_commands()
             issues = []
-            for i, cmd in enumerate(data.get("commands", []), 1):
-                if cmd.get("op") != "set_parameter":
-                    issues.append(f"Lệnh {i}: V0.4 hiện chỉ hỗ trợ lệnh set_parameter."); continue
-                comp = next((c for c in self.project["components"] if c["component_id"] == cmd.get("component_id")), None)
+            commands = data.get("commands", [])
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") == "create_rectangle_extrude"]
+            if geometry_commands and len(commands) != 1:
+                issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
+            for i, cmd in enumerate(commands, 1):
+                if not isinstance(cmd, dict):
+                    issues.append(f"Lệnh {i}: mỗi phần tử commands phải là một đối tượng JSON.")
+                    continue
+                op = cmd.get("op")
+                comp = next((c for c in self.project["components"] if c.get("component_id") == cmd.get("component_id")), None)
                 if not comp:
-                    issues.append(f'Lệnh {i}: không tìm thấy chi tiết {cmd.get("component_id")}.'); continue
-                if cmd.get("parameter") not in comp.get("parameters", {}):
-                    issues.append(f'Lệnh {i}: tham số "{cmd.get("parameter")}" không tồn tại trong chi tiết.')
-                if not isinstance(cmd.get("value"), (int, float)):
-                    issues.append(f"Lệnh {i}: value phải là số.")
-                current = comp.get("parameters", {}).get(cmd.get("parameter"), {})
-                if isinstance(current, dict) and cmd.get("unit") != current.get("unit"):
-                    issues.append(f'Lệnh {i}: đơn vị lệnh ({cmd.get("unit")}) khác đơn vị tham số ({current.get("unit")}).')
-            if not data.get("commands") and not data.get("questions"):
+                    issues.append(f'Lệnh {i}: không tìm thấy chi tiết {cmd.get("component_id")}.')
+                    continue
+                if op == "set_parameter":
+                    if cmd.get("parameter") not in comp.get("parameters", {}):
+                        issues.append(f'Lệnh {i}: tham số "{cmd.get("parameter")}" không tồn tại trong chi tiết.')
+                    if isinstance(cmd.get("value"), bool) or not isinstance(cmd.get("value"), (int, float)):
+                        issues.append(f"Lệnh {i}: value phải là số.")
+                    current = comp.get("parameters", {}).get(cmd.get("parameter"), {})
+                    if isinstance(current, dict) and cmd.get("unit") != current.get("unit"):
+                        issues.append(f'Lệnh {i}: đơn vị lệnh ({cmd.get("unit")}) khác đơn vị tham số ({current.get("unit")}).')
+                elif op == "create_rectangle_extrude":
+                    if not comp.get("inventor_file"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_rectangle_command(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
+                else:
+                    issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.5.")
+            if not commands and not data.get("questions"):
                 issues.append("Không có lệnh hoặc câu hỏi nào.")
             self.pending_commands = data
             msg = "KIỂM TRA HOÀN TẤT\n"
-            msg += f"Số lệnh: {len(data.get('commands', []))}\n"
+            msg += f"Số lệnh: {len(commands)}\n"
             msg += f"Câu hỏi cần làm rõ: {len(data.get('questions', []))}\n"
             msg += f"Cảnh báo: {len(data.get('warnings', []))}\n\n"
             msg += "\n".join(issues) if issues else "Không phát hiện lỗi cấu trúc cơ bản."
@@ -445,7 +479,6 @@ class MainWindow(QMainWindow):
             self.command_result.setPlainText("JSON / kiểm tra không hợp lệ:\n" + str(e))
             return False
 
-
     def apply_commands(self):
         if not self.validate_commands():
             QMessageBox.warning(self, "Chưa thể áp dụng", "Hãy sửa lỗi hoặc bổ sung thông tin trước."); return
@@ -456,6 +489,65 @@ class MainWindow(QMainWindow):
         for cmd in data["commands"]:
             comp = next(c for c in self.project["components"] if c["component_id"] == cmd["component_id"])
             targets.append((comp, cmd))
+
+        # Geometry operations are intentionally a single-command transaction in V0.5.
+        if targets and targets[0][1].get("op") == "create_rectangle_extrude":
+            comp, cmd = targets[0]
+            path = comp.get("inventor_file")
+            try:
+                if self.inventor_app is None: self.inventor_app = connect_inventor()
+                doc = get_document_by_path(self.inventor_app, path)
+                if doc is None:
+                    raise InventorBridgeError("Hãy mở đúng file IPT đã liên kết trong Inventor.")
+            except Exception as e:
+                QMessageBox.warning(self, "Inventor", str(e)); return
+            dims = (
+                f'Dài X: {cmd["length"]} mm · Rộng Y: {cmd["width"]} mm · '
+                f'Đùn Z: {cmd["thickness"]} mm · Gốc: ({cmd.get("origin_x", 0)}, {cmd.get("origin_y", 0)}) mm'
+            )
+            intro = (
+                "Sẽ tạo hình học thật trong Inventor 2018: " + str(path) + "\n" +
+                dims + "\nOperation: " + str(cmd.get("operation", "auto")) +
+                "\nSẽ tạo file backup trước khi thay đổi."
+            )
+            if QMessageBox.question(self, "Xác nhận tạo Sketch/Extrude", intro + "\n\nTiếp tục?") != QMessageBox.Yes:
+                return
+            try:
+                result = create_rectangle_extrude(doc, self.inventor_app, cmd)
+                comp["parameters"] = copy.deepcopy(result["parameters"])
+                self.project["change_history"].append({
+                    "timestamp": now(),
+                    "component_id": cmd["component_id"],
+                    "operation": "create_rectangle_extrude",
+                    "dimensions_mm": result["dimensions_mm"],
+                    "parameter_names": result["parameter_names"],
+                    "backup_file": result["backup_path"],
+                    "inventor_file": result["document_path"],
+                    "source": "ChatGPT manual",
+                    "applied_to_inventor": True,
+                    "reason": cmd.get("reason", "")
+                })
+                self.inv_log.append(
+                    "ĐÃ TẠO SKETCH + EXTRUDE TRONG INVENTOR\n"
+                    + "FILE: " + result["document_path"] + "\n"
+                    + "BACKUP: " + result["backup_path"] + "\n"
+                    + "THAM SỐ: " + json.dumps(result["parameter_names"], ensure_ascii=False)
+                )
+                self.refresh_project_view()
+                if self.project_path: save_json(self.project_path, self.project)
+                else: self.save_project()
+                self.command_result.append(
+                    "\nĐÃ TẠO SKETCH + EXTRUDE TRONG INVENTOR. Backup: " + result["backup_path"]
+                )
+                QMessageBox.information(
+                    self, "Hoàn tất",
+                    "Đã tạo Sketch chữ nhật có ràng buộc và Extrude trong Inventor.\n"
+                    "Backup: " + result["backup_path"]
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi tạo hình học", str(e))
+            return
+
         paths = {os.path.normcase(os.path.abspath(c.get("inventor_file", ""))) for c,cmd in targets if c.get("inventor_file")}
         if paths and (len(paths) != 1 or any(not c.get("inventor_file") for c,cmd in targets)):
             QMessageBox.warning(self, "Nhiều file IPT", "Hãy chia lệnh theo từng file IPT."); return
