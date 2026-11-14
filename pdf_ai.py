@@ -267,6 +267,8 @@ def analysis_schema() -> dict[str, Any]:
         "feature_summary": {"type": "array", "items": {"type": "string"}},
         "manufacturing_notes": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "geometry_view": {"type": "string"},
+        "geometry_page": {"type": "integer"},
         "scale_status": {"type": "string", "enum": ["verified", "unverified", "conflict"]},
         "scale_references": {"type": "array", "items": scale_reference_schema},
         "cad_command": {"anyOf": [command_schema, {"type": "null"}]},
@@ -281,10 +283,11 @@ def analysis_schema() -> dict[str, Any]:
     }
 
 
-def _analysis_prompt(project_id: str, component_id: str, part_name: str, document_path: str) -> str:
+def _analysis_prompt(project_id: str, component_id: str, part_name: str, document_path: str, vector_context: str) -> str:
     return f"""
 Bạn là kỹ sư thiết kế cơ khí và trợ lý chuyển bản vẽ PDF sang Autodesk Inventor 2018.
-Hãy đọc TOÀN BỘ các trang PDF, kết hợp chữ trích xuất và hình ảnh trang bản vẽ.
+Hãy đọc TOÀN BỘ các trang PDF, kết hợp chữ trích xuất, hình ảnh trang bản vẽ và dữ liệu VECTOR CAD được cung cấp bên dưới.
+PDF được xuất từ CAD/SolidWorks/Inventor thường chứa tọa độ đường nét vector chính xác. Ưu tiên vector path và text gốc, không dùng pixel để tự đo kích thước.
 
 Ngữ cảnh đích:
 - project_id: {project_id}
@@ -302,6 +305,12 @@ YÊU CẦU PHÂN TÍCH:
 7. Phân biệt kích thước tổng thể với kích thước chi tiết; không cộng trùng các kích thước.
 8. Nêu rõ các đặc tính hình học cần dựng: bậc, rãnh, lỗ, ren, vát, bo, gân, hốc, mặt nghiêng...
 9. Nếu có nhiều chi tiết trong bản lắp, không được giả làm một khối đơn.
+10. Xác định geometry_view và geometry_page: hình chiếu vuông góc rõ nhất được chọn làm hình học chính, không chọn hình trục đo/mặt cắt/phóng to.
+11. Dùng scale_references để trỏ chính xác tới đoạn vector thẳng tương ứng với kích thước số: page (1-based), vector_path_id (id trong page_details.paths), segment_index (0-based trong segments), axis (x/y/z), view, dimension_text và value_mm. measured_length_pt phải là chiều dài hình học thật của đoạn vector tính theo PDF point; mm_per_pt=value_mm/measured_length_pt.
+12. Cần ít nhất hai chuẩn đo trong cùng geometry_view và geometry_page: một trục x và một trục y. Các tỷ lệ mm_per_pt phải khớp nhau trong 2%. Nếu không tìm được đoạn vector thật đúng với đường bao chi tiết (không chọn đường kích thước/mũi tên/khung giấy), scale_status=unverified và cad_command=null.
+13. Số kích thước ghi trực tiếp (mm/inch) là chuẩn cuối cùng. Vector scale chỉ để hiệu chuẩn/toạ độ và kiểm tra chéo; không được scale hình học để thay đổi kích thước ghi số.
+14. Khi tạo points/holes, toạ độ phải được suy ra từ hình chiếu vector đã hiệu chuẩn theo mm_per_pt và được đặt gốc (0,0) tại góc trái-dưới của đường bao ngoài. Không đo đường bao bằng pixel.
+15. Nếu số kích thước trên bản vẽ mâu thuẫn với chiều dài vector hoặc các tỷ lệ giữa X/Y sai khác quá 2%, đánh dấu conflict, không tạo cad_command.
 
 GIỚI HẠN CAD HIỆN TẠI:
 - Có thể tạo một feature cho mỗi lần chạy: Sketch chữ nhật + Extrude; Sketch tròn + Extrude; hoặc Sketch biên dạng đa giác kín + Extrude, kèm các lỗ tròn xuyên suốt.
@@ -313,6 +322,9 @@ GIỚI HẠN CAD HIỆN TẠI:
 - Nếu đề xuất create_circle_extrude: điền diameter và thickness bằng mm; các trường hình học không dùng thì null hoặc mảng rỗng; unit=mm; operation=new_body; direction=positive; center_x=center_y=0 trừ khi bản vẽ chỉ rõ vị trí khác.
 - Nếu đề xuất create_profile_extrude: điền points là danh sách tọa độ x/y theo mm của đường bao ngoài theo thứ tự liên tiếp, đóng kín tự động; gốc XY ở góc trái-dưới của hình chiếu chính. Điền holes cho lỗ tròn xuyên suốt với center_x/center_y/diameter bằng mm; nếu không có lỗ dùng mảng rỗng. Điền thickness bằng mm; unit=mm; operation=new_body; direction=positive. Các trường riêng cho hình chữ nhật/hình tròn phải null.
 - Không dùng lệnh cut hoặc tự phối hợp nhiều feature trong bản phát hành này.
+
+DỮ LIỆU VECTOR PDF (JSON, tọa độ point của PDF; không phải mm):
+{vector_context}
 
 Chỉ trả dữ liệu theo JSON Schema đã cung cấp. Không thêm Markdown.
 """.strip()
