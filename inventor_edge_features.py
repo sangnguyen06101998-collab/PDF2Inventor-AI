@@ -53,7 +53,7 @@ def create_edge_finish(document, inventor_app, command):
         if component.SurfaceBodies.Count < 1:
             raise InventorBridgeError("IPT chưa có solid body.")
         body = component.SurfaceBodies.Item(1)
-        edge_set = inventor_app.TransientObjects.CreateObjectCollection()
+        edge_set = inventor_app.TransientObjects.CreateEdgeCollection()
         for index in cfg["edge_indices"]:
             if index > body.Edges.Count:
                 raise InventorBridgeError(f"Cạnh số {index} vượt quá tổng {body.Edges.Count} cạnh hiện tại.")
@@ -61,13 +61,11 @@ def create_edge_finish(document, inventor_app, command):
         if cfg["op"] == "create_fillet":
             definitions = component.Features.FilletFeatures
             definition = definitions.CreateFilletDefinition()
-            definition.AddConstantRadiusEdgeSet(edge_set, cfg["radius"] / 10.0, True)
+            definition.AddConstantRadiusEdgeSet(edge_set, f'{cfg["radius"]:.12g} mm')
             feature = definitions.Add(definition)
         else:
             definitions = component.Features.ChamferFeatures
-            definition = definitions.CreateChamferDefinition()
-            definition.AddUsingDistance(edge_set, cfg["distance"] / 10.0, True)
-            feature = definitions.Add(definition)
+            feature = definitions.AddUsingDistance(edge_set, f'{cfg["distance"]:.12g} mm', True)
         feature.Name = "P2I_Fillet" if cfg["op"] == "create_fillet" else "P2I_Chamfer"
         document.Update()
         document.Save()
