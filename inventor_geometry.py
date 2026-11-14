@@ -57,9 +57,9 @@ def validate_rectangle_command(command):
         raise InventorBridgeError("parameter_names phải là một đối tượng JSON.")
     names = {}
     for key, default in (
-        ("length", "P2I_Length"),
-        ("width", "P2I_Width"),
-        ("thickness", "P2I_Thickness"),
+        ("length", "Length"),
+        ("width", "Width"),
+        ("thickness", "Thickness"),
     ):
         name = str(parameter_names.get(key, default)).strip()
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
@@ -215,7 +215,28 @@ def create_rectangle_extrude(document, inventor_app, command):
             body_count = 0
         operation = cfg["operation"]
         if operation == "auto":
-            operation = "join" if body_count > 0 else "new_body"
+            # Use join only when the new extrusion's bounding box overlaps an
+            # existing solid; otherwise create a separate solid body.
+            current_box = _range_box_mm(component)
+            operation = "new_body"
+            if body_count > 0 and current_box:
+                existing_min = current_box["min_mm"]
+                existing_max = current_box["max_mm"]
+                new_z_min = 0.0 if cfg["direction"] == "positive" else -cfg["thickness"]
+                new_z_max = cfg["thickness"] if cfg["direction"] == "positive" else 0.0
+                new_min = [cfg["origin_x"], cfg["origin_y"], new_z_min]
+                new_max = [
+                    cfg["origin_x"] + cfg["length"],
+                    cfg["origin_y"] + cfg["width"],
+                    new_z_max,
+                ]
+                overlaps = all(
+                    min(existing_max[axis], new_max[axis])
+                    - max(existing_min[axis], new_min[axis]) > 1e-6
+                    for axis in range(3)
+                )
+                if overlaps:
+                    operation = "join"
         if operation == "join" and body_count == 0:
             raise InventorBridgeError(
                 "operation='join' nhưng IPT chưa có solid body. Hãy dùng operation='new_body' hoặc 'auto'."
