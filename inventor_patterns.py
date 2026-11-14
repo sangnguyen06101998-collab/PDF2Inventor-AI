@@ -24,32 +24,19 @@ def validate_pattern(command):
     if isinstance(axis, bool) or not isinstance(axis, int) or axis < 1:
         raise InventorBridgeError("axis_index phải là số nguyên dương trong WorkAxes.")
     result = {"op": command["op"], "feature_names": names, "axis_index": axis, "unit": "mm"}
+    count = command.get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 2:
+        raise InventorBridgeError("count phải là số nguyên >= 2.")
+    spacing = command.get("spacing_mm", 0)
+    if isinstance(spacing, bool) or not isinstance(spacing, (int, float)) or not math.isfinite(float(spacing)) or spacing < 0:
+        raise InventorBridgeError("spacing_mm phải là số hữu hạn không âm.")
+    result.update({"count": count, "spacing_mm": float(spacing)})
     if command["op"] == "create_circular_pattern":
-        count = command.get("count")
         angle = command.get("angle_deg", 360)
-        if isinstance(count, bool) or not isinstance(count, int) or count < 2:
-            raise InventorBridgeError("count của circular pattern phải >= 2.")
         if isinstance(angle, bool) or not isinstance(angle, (int, float)) or not math.isfinite(float(angle)) or not 0 < angle <= 360:
             raise InventorBridgeError("angle_deg phải trong khoảng (0, 360].")
-        result.update({"count": count, "angle_deg": float(angle),
-                       "natural_axis_direction": bool(command.get("natural_axis_direction", True))})
-    else:
-        for key in ("count_x", "count_y"):
-            value = command.get(key, 1)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise InventorBridgeError(f"{key} phải là số nguyên >= 1.")
-            result[key] = value
-        for key in ("spacing_x", "spacing_y"):
-            value = command.get(key, 0)
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value < 0:
-                raise InventorBridgeError(f"{key} phải là số >= 0.")
-            result[key] = float(value)
-        result["axis_x_index"] = axis
-        result["axis_y_index"] = command.get("axis_y_index", 2)
-        if isinstance(result["axis_y_index"], bool) or not isinstance(result["axis_y_index"], int) or result["axis_y_index"] < 1:
-            raise InventorBridgeError("axis_y_index phải là số nguyên dương.")
-        if result["count_x"] == 1 and result["count_y"] == 1:
-            raise InventorBridgeError("Rectangular pattern cần count_x hoặc count_y lớn hơn 1.")
+        result["angle_deg"] = float(angle)
+        result["natural_axis_direction"] = bool(command.get("natural_axis_direction", True))
     return result
 
 
@@ -74,26 +61,19 @@ def create_pattern(document, inventor_app, command):
                 objects.Add(component.Features.Item(name))
             except Exception as exc:
                 raise InventorBridgeError(f"Không tìm thấy Feature '{name}' trong IPT.") from exc
+        axis = component.WorkAxes.Item(cfg["axis_index"])
         if cfg["op"] == "create_circular_pattern":
-            axis = component.WorkAxes.Item(cfg["axis_index"])
             patterns = component.Features.CircularPatternFeatures
             definition = patterns.CreateDefinition(
                 objects, axis, cfg["natural_axis_direction"], cfg["count"],
-                inventor_app.TransientGeometry.CreateAngle(cfg["angle_deg"] * math.pi / 180.0),
-                True, K_IDENTICAL_PATTERN_COMPUTE
+                f'{cfg["angle_deg"]:.12g} deg', True
             )
         else:
-            axis_x = component.WorkAxes.Item(cfg["axis_x_index"])
-            axis_y = component.WorkAxes.Item(cfg["axis_y_index"])
             patterns = component.Features.RectangularPatternFeatures
             definition = patterns.CreateDefinition(
-                objects, axis_x, True, cfg["count_x"],
-                f'{cfg["spacing_x"]:.12g} mm',
-                axis_y, True, cfg["count_y"],
-                f'{cfg["spacing_y"]:.12g} mm',
-                K_IDENTICAL_PATTERN_COMPUTE
+                objects, axis, True, cfg["count"], f'{cfg["spacing_mm"]:.12g} mm'
             )
-        feature = patterns.Add(definition)
+        feature = patterns.AddByDefinition(definition)
         feature.Name = "P2I_CircularPattern" if cfg["op"] == "create_circular_pattern" else "P2I_RectangularPattern"
         document.Update()
         document.Save()
