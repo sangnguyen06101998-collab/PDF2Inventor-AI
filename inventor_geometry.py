@@ -559,7 +559,7 @@ def _point_segment_distance(point, start, end):
 
 
 def validate_profile_command(command):
-    """Validate a closed polygon profile with explicit circular through-holes."""
+    """Validate a closed polygon profile with circular holes and inner cutout loops."""
     if not isinstance(command, dict) or command.get("op") != "create_profile_extrude":
         raise InventorBridgeError("Lệnh biên dạng phải dùng op='create_profile_extrude'.")
     if command.get("unit") != "mm":
@@ -569,40 +569,40 @@ def validate_profile_command(command):
     if direction not in {"positive", "negative"}:
         raise InventorBridgeError("direction chỉ nhận positive hoặc negative.")
 
-    raw_points = command.get("points")
-    if not isinstance(raw_points, list) or not 3 <= len(raw_points) <= 200:
-        raise InventorBridgeError("Biên dạng ngoài cần từ 3 đến 200 điểm.")
-    points = []
-    for index, item in enumerate(raw_points, 1):
-        if not isinstance(item, dict):
-            raise InventorBridgeError(f"Điểm {index} phải có dạng đối tượng x/y.")
-        x = _number(item.get("x"), f"points[{index}].x")
-        y = _number(item.get("y"), f"points[{index}].y")
-        points.append((x, y))
+    def parse_polygon(raw, label):
+        if not isinstance(raw, list) or not 3 <= len(raw) <= 200:
+            raise InventorBridgeError(f"{label} cần từ 3 đến 200 điểm.")
+        polygon = []
+        for index, item in enumerate(raw, 1):
+            if not isinstance(item, dict):
+                raise InventorBridgeError(f"{label}, điểm {index} không hợp lệ.")
+            polygon.append((
+                _number(item.get("x"), f"{label}[{index}].x"),
+                _number(item.get("y"), f"{label}[{index}].y"),
+            ))
+        if len(set(polygon)) < 3:
+            raise InventorBridgeError(f"{label} có dưới 3 điểm khác nhau.")
+        for index in range(len(polygon)):
+            if math.dist(polygon[index], polygon[(index + 1) % len(polygon)]) <= 1e-6:
+                raise InventorBridgeError(f"{label} có cạnh bằng 0.")
+        area2 = sum(
+            polygon[i][0] * polygon[(i + 1) % len(polygon)][1]
+            - polygon[(i + 1) % len(polygon)][0] * polygon[i][1]
+            for i in range(len(polygon))
+        )
+        if abs(area2) <= 1e-6:
+            raise InventorBridgeError(f"Diện tích {label} bằng 0.")
+        for i in range(len(polygon)):
+            a, b = polygon[i], polygon[(i + 1) % len(polygon)]
+            for j in range(i + 1, len(polygon)):
+                if j == (i + 1) % len(polygon) or i == (j + 1) % len(polygon):
+                    continue
+                if _segments_intersect(a, b, polygon[j], polygon[(j + 1) % len(polygon)]):
+                    raise InventorBridgeError(f"{label} tự giao nhau.")
+        return polygon
 
-    if len(set(points)) < 3:
-        raise InventorBridgeError("Biên dạng ngoài phải có ít nhất 3 điểm khác nhau.")
-    for index in range(len(points)):
-        if math.dist(points[index], points[(index + 1) % len(points)]) <= 1e-6:
-            raise InventorBridgeError("Hai điểm liên tiếp của biên dạng không được trùng nhau.")
-
-    area2 = sum(
-        points[i][0] * points[(i + 1) % len(points)][1]
-        - points[(i + 1) % len(points)][0] * points[i][1]
-        for i in range(len(points))
-    )
-    if abs(area2) <= 1e-6:
-        raise InventorBridgeError("Diện tích biên dạng bằng 0 hoặc các điểm gần thẳng hàng.")
-
+    points = parse_polygon(command.get("points"), "Biên dạng ngoài")
     point_count = len(points)
-    for i in range(point_count):
-        a, b = points[i], points[(i + 1) % point_count]
-        for j in range(i + 1, point_count):
-            if j == i or j == (i + 1) % point_count or i == (j + 1) % point_count:
-                continue
-            c, d = points[j], points[(j + 1) % point_count]
-            if _segments_intersect(a, b, c, d):
-                raise InventorBridgeError("Biên dạng ngoài tự giao nhau; cần sửa thứ tự các điểm.")
 
     raw_holes = command.get("holes") or []
     if not isinstance(raw_holes, list) or len(raw_holes) > 50:
@@ -635,6 +635,48 @@ def validate_profile_command(command):
             "diameter": diameter,
         })
 
+    raw_cutouts = command.get("cutouts") or []
+    if not isinstance(raw_cutouts, list) or len(raw_cutouts) > 50:
+        raise InventorBridgeError("Danh sách cutout phải là mảng, tối đa 50 biên dạng.")
+    cutouts = []
+    for cutout_index, raw_cutout in enumerate(raw_cutouts, 1):
+        polygon = parse_polygon(raw_cutout, f"Cutout {cutout_index}")
+        for point_index in range(len(polygon)):
+            a, b = polygon[point_index], polygon[(point_index + 1) % len(polygon)]
+            if not _point_in_polygon(a, points):
+                raise InventorBridgeError(f"Cutout {cutout_index} nằm ngoài hoặc chạm biên dạng ngoài.")
+            for outer_index in range(point_count):
+                if _segments_intersect(
+                    a, b, points[outer_index], points[(outer_index + 1) % point_count]
+                ):
+                    raise InventorBridgeError(f"Cutout {cutout_index} cắt qua đường bao ngoài.")
+        for previous_index, previous in enumerate(cutouts, 1):
+            if any(_point_in_polygon(point, previous) for point in polygon) or any(
+                _point_in_polygon(point, polygon) for point in previous
+            ):
+                raise InventorBridgeError(f"Cutout {cutout_index} chồng lên cutout {previous_index}.")
+            for i in range(len(polygon)):
+                for j in range(len(previous)):
+                    if _segments_intersect(
+                        polygon[i], polygon[(i + 1) % len(polygon)],
+                        previous[j], previous[(j + 1) % len(previous)],
+                    ):
+                        raise InventorBridgeError(f"Cutout {cutout_index} giao với cutout {previous_index}.")
+        cutouts.append(polygon)
+
+    for hole_index, hole in enumerate(holes, 1):
+        center = (hole["center_x"], hole["center_y"])
+        radius = hole["diameter"] / 2.0
+        for cutout_index, polygon in enumerate(cutouts, 1):
+            if _point_in_polygon(center, polygon):
+                raise InventorBridgeError(f"Lỗ tròn {hole_index} nằm trong cutout {cutout_index}.")
+            clearance = min(
+                _point_segment_distance(center, polygon[i], polygon[(i + 1) % len(polygon)])
+                for i in range(len(polygon))
+            )
+            if clearance <= radius + 1e-6:
+                raise InventorBridgeError(f"Lỗ tròn {hole_index} chạm cutout {cutout_index}.")
+
     parameter_names = command.get("parameter_names") or {}
     if not isinstance(parameter_names, dict):
         raise InventorBridgeError("parameter_names phải là một đối tượng JSON.")
@@ -645,6 +687,7 @@ def validate_profile_command(command):
     return {
         "points": points,
         "holes": holes,
+        "cutouts": cutouts,
         "thickness": thickness,
         "direction": direction,
         "parameter_names": {"thickness": thickness_name},
