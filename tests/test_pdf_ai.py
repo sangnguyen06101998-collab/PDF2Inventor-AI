@@ -13,6 +13,9 @@ from pdf_ai import (
     _extract_output_text,
     analyze_pdf,
     _dpapi_crypt,
+    verify_scale_references,
+    validate_command_dimensions,
+    derive_profile_from_vectors,
 )
 
 
@@ -195,6 +198,146 @@ class PdfAiSchemaTests(unittest.TestCase):
         }
         with self.assertRaises(PdfAIError):
             _extract_output_text(response)
+
+
+
+
+class VectorScaleVerificationTests(unittest.TestCase):
+    def vector_report(self):
+        return {
+            "native_vector_pdf": True,
+            "page_details": [{
+                "page": 1,
+                "paths": [
+                    {
+                        "id": 10,
+                        "segments": [["L", 0, 0, 100, 0]],
+                    },
+                    {
+                        "id": 11,
+                        "segments": [["L", 0, 0, 0, 50]],
+                    },
+                    {
+                        "id": 12,
+                        "closed": True,
+                        "bbox_pt": [10, 10, 110, 60],
+                        "segments": [
+                            ["L", 10, 10, 110, 10],
+                            ["L", 110, 10, 110, 60],
+                            ["L", 110, 60, 10, 60],
+                            ["L", 10, 60, 10, 10],
+                        ],
+                    },
+                    {
+                        "id": 13,
+                        "closed": True,
+                        "has_circle_or_arc_candidate": True,
+                        "bbox_pt": [30, 25, 40, 35],
+                        "segments": [["C", 30, 30, 32, 25, 38, 25, 40, 30]],
+                    },
+                ],
+            }],
+        }
+
+    def test_scale_references_are_recomputed_from_vector_lines(self):
+        report = self.vector_report()
+        analysis = {
+            "geometry_view": "Front",
+            "geometry_page": 1,
+            "scale_references": [
+                {
+                    "dimension_text": "200",
+                    "value_mm": 200,
+                    "measured_length_pt": 100,
+                    "mm_per_pt": 2,
+                    "page": 1,
+                    "vector_path_id": 10,
+                    "segment_index": 0,
+                    "axis": "x",
+                    "view": "Front",
+                    "confidence": "high",
+                },
+                {
+                    "dimension_text": "100",
+                    "value_mm": 100,
+                    "measured_length_pt": 50,
+                    "mm_per_pt": 2,
+                    "page": 1,
+                    "vector_path_id": 11,
+                    "segment_index": 0,
+                    "axis": "y",
+                    "view": "Front",
+                    "confidence": "high",
+                },
+            ],
+        }
+        result = verify_scale_references(report, analysis)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["mm_per_pt"], 2)
+        self.assertEqual(len(result["references_checked"]), 2)
+
+    def test_scale_conflict_fails_when_x_and_y_are_inconsistent(self):
+        report = self.vector_report()
+        analysis = {
+            "geometry_view": "Front",
+            "geometry_page": 1,
+            "scale_references": [
+                {
+                    "dimension_text": "200", "value_mm": 200, "measured_length_pt": 100,
+                    "mm_per_pt": 2, "page": 1, "vector_path_id": 10, "segment_index": 0,
+                    "axis": "x", "view": "Front", "confidence": "high",
+                },
+                {
+                    "dimension_text": "150", "value_mm": 150, "measured_length_pt": 50,
+                    "mm_per_pt": 3, "page": 1, "vector_path_id": 11, "segment_index": 0,
+                    "axis": "y", "view": "Front", "confidence": "high",
+                },
+            ],
+        }
+        result = verify_scale_references(report, analysis)
+        self.assertFalse(result["verified"])
+        self.assertIn("sai khác", result["reason"])
+
+    def test_vector_profile_and_circle_are_converted_to_mm(self):
+        result = derive_profile_from_vectors(
+            self.vector_report(),
+            1,
+            12,
+            [13],
+            2.0,
+        )
+        self.assertEqual(len(result["points"]), 4)
+        self.assertEqual(result["points"], [
+            {"x": 0.0, "y": 100.0},
+            {"x": 200.0, "y": 100.0},
+            {"x": 200.0, "y": 0.0},
+            {"x": 0.0, "y": 0.0},
+        ])
+        self.assertEqual(result["holes"][0]["diameter"], 20.0)
+        self.assertEqual(result["holes"][0]["center_x"], 60.0)
+        self.assertEqual(result["holes"][0]["center_y"], 60.0)
+
+    def test_bounding_dimensions_must_match_drawing_values(self):
+        analysis = {
+            "overall_length_mm": 200,
+            "overall_width_mm": 100,
+            "overall_height_mm": 8,
+            "dimensions_detected": [],
+        }
+        command = {
+            "op": "create_profile_extrude",
+            "points": [
+                {"x": 0, "y": 0},
+                {"x": 200, "y": 0},
+                {"x": 200, "y": 100},
+                {"x": 0, "y": 100},
+            ],
+            "thickness": 8,
+            "holes": [],
+        }
+        self.assertEqual(validate_command_dimensions(analysis, command), [])
+        command["thickness"] = 10
+        self.assertTrue(validate_command_dimensions(analysis, command))
 
 
 class PdfAiReportTests(unittest.TestCase):
