@@ -870,8 +870,14 @@ class MainWindow(QMainWindow):
         if not self.validate_commands():
             QMessageBox.warning(self, "Chưa thể áp dụng", "Hãy sửa lỗi hoặc bổ sung thông tin trước."); return
         data = self.pending_commands
+        if data.get("questions"):
+            QMessageBox.warning(
+                self, "Chưa đủ dữ liệu",
+                "Bản vẽ còn câu hỏi cần làm rõ. Hãy giải quyết các câu hỏi trước khi cho phép Inventor thay đổi mô hình."
+            )
+            return
         if not data.get("commands"):
-            QMessageBox.information(self, "Không có thay đổi", "ChatGPT chưa đưa ra lệnh sửa nào."); return
+            QMessageBox.information(self, "Không có thay đổi", "AI/ChatGPT chưa đưa ra lệnh sửa nào."); return
         targets = []
         for cmd in data["commands"]:
             comp = next(c for c in self.project["components"] if c["component_id"] == cmd["component_id"])
