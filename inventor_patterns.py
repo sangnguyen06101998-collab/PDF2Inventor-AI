@@ -25,8 +25,9 @@ def validate_pattern(command):
         raise InventorBridgeError("axis_index phải là số nguyên dương trong WorkAxes.")
     result = {"op": command["op"], "feature_names": names, "axis_index": axis, "unit": "mm"}
     count = command.get("count")
-    if isinstance(count, bool) or not isinstance(count, int) or count < 2:
-        raise InventorBridgeError("count phải là số nguyên >= 2.")
+    minimum_count = 2 if command["op"] == "create_circular_pattern" else 1
+    if isinstance(count, bool) or not isinstance(count, int) or count < minimum_count:
+        raise InventorBridgeError(f"count phải là số nguyên >= {minimum_count}.")
     spacing = command.get("spacing_mm", 0)
     if isinstance(spacing, bool) or not isinstance(spacing, (int, float)) or not math.isfinite(float(spacing)) or spacing < 0:
         raise InventorBridgeError("spacing_mm phải là số hữu hạn không âm.")
