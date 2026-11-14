@@ -15,6 +15,7 @@ K_VERTICAL_DIM = 19202
 K_POSITIVE_EXTENT_DIRECTION = 20993
 K_NEGATIVE_EXTENT_DIRECTION = 20994
 K_JOIN_OPERATION = 20481
+K_CUT_OPERATION = 20482
 K_NEW_BODY_OPERATION = 20485
 
 
@@ -49,8 +50,8 @@ def validate_rectangle_command(command):
         raise InventorBridgeError("direction chỉ nhận 'positive' hoặc 'negative'.")
 
     operation = str(command.get("operation", "auto")).strip().lower()
-    if operation not in {"auto", "join", "new_body"}:
-        raise InventorBridgeError("operation chỉ nhận 'auto', 'join' hoặc 'new_body'.")
+    if operation not in {"auto", "join", "new_body", "cut"}:
+        raise InventorBridgeError("operation chỉ nhận auto, join, new_body hoặc cut.")
 
     parameter_names = command.get("parameter_names") or {}
     if not isinstance(parameter_names, dict):
@@ -237,11 +238,11 @@ def create_rectangle_extrude(document, inventor_app, command):
                 )
                 if overlaps:
                     operation = "join"
-        if operation == "join" and body_count == 0:
+        if operation in {"join", "cut"} and body_count == 0:
             raise InventorBridgeError(
-                "operation='join' nhưng IPT chưa có solid body. Hãy dùng operation='new_body' hoặc 'auto'."
+                f"operation={operation} nhưng IPT chưa có solid body. Hãy tạo solid trước hoặc dùng operation=new_body."
             )
-        operation_enum = K_JOIN_OPERATION if operation == "join" else K_NEW_BODY_OPERATION
+        operation_enum = {"join": K_JOIN_OPERATION, "new_body": K_NEW_BODY_OPERATION, "cut": K_CUT_OPERATION}[operation]
         direction_enum = (
             K_POSITIVE_EXTENT_DIRECTION
             if cfg["direction"] == "positive"
