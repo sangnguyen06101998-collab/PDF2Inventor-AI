@@ -18,6 +18,7 @@ from inventor_patterns import create_pattern, validate_pattern
 from inventor_assembly import create_assembly_iam, validate_assembly_command
 from inventor_holes import create_hole, validate_hole_command
 from inventor_threads import create_thread, validate_thread
+from inventor_topology import inspect_topology
 
 APP_TITLE = "PDF2Inventor Local Edition · V0.6"
 SCHEMA_VERSION = "0.2"
@@ -193,7 +194,8 @@ class MainWindow(QMainWindow):
             ("Kết nối Inventor", self.ui_connect_inventor),
             ("Đọc tài liệu", self.ui_read_inventor),
             ("Gắn IPT vào chi tiết", self.ui_link_inventor),
-            ("Đồng bộ tham số", self.ui_sync_inventor)
+            ("Đồng bộ tham số", self.ui_sync_inventor),
+            ("Đọc mặt/cạnh B-rep", self.ui_inspect_topology)
         ]:
             btn = QPushButton(caption); btn.clicked.connect(handler); row.addWidget(btn)
         root.addLayout(row)
@@ -223,6 +225,15 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Đọc Inventor", str(e))
             return None, None, None
+
+    def ui_inspect_topology(self):
+        try:
+            if self.inventor_app is None: self.inventor_app = connect_inventor()
+            doc = get_active_document(self.inventor_app)
+            inventory = inspect_topology(doc)
+            self.inv_log.append("TOPOLOGY INVENTORY · Face/Edge index chỉ có hiệu lực với trạng thái IPT hiện tại:\\n" + json.dumps(inventory, ensure_ascii=False, indent=2))
+        except Exception as e:
+            QMessageBox.warning(self, "Đọc topology", str(e))
 
     def ui_link_inventor(self):
         row = self.component_list.currentRow()
