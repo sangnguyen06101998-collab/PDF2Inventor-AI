@@ -15,6 +15,7 @@ from pdf_vector import analyze_pdf_vector, format_analysis_summary, save_analysi
 from inventor_advanced import create_profile_extrude, validate_advanced_profile
 from inventor_edge_features import create_edge_finish, validate_edge_finish
 from inventor_patterns import create_pattern, validate_pattern
+from inventor_assembly import create_assembly_iam, validate_assembly_command
 
 APP_TITLE = "PDF2Inventor Local Edition · V0.6"
 SCHEMA_VERSION = "0.2"
@@ -553,6 +554,11 @@ class MainWindow(QMainWindow):
                         validate_pattern(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_assembly_iam":
+                    try:
+                        validate_assembly_command(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
                 else:
                     issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.6.")
             if not commands and not data.get("questions"):
@@ -582,7 +588,35 @@ class MainWindow(QMainWindow):
             comp = next(c for c in self.project["components"] if c["component_id"] == cmd["component_id"])
             targets.append((comp, cmd))
 
-        # Geometry operations are intentionally a single-command transaction in V0.5.
+        if targets and targets[0][1].get("op") == "create_assembly_iam":
+            comp, cmd = targets[0]
+            if QMessageBox.question(
+                self, "Xác nhận tạo Assembly IAM",
+                "Sẽ tạo một file IAM mới và chèn các IPT theo tọa độ XYZ đã khai báo (mm).\\n"
+                + cmd["output_path"] + "\\nSố chi tiết: " + str(len(cmd["components"])) + "\\n\\nTiếp tục?"
+            ) != QMessageBox.Yes:
+                return
+            try:
+                if self.inventor_app is None: self.inventor_app = connect_inventor()
+                result = create_assembly_iam(self.inventor_app, cmd)
+                comp["document_type"] = "assembly"
+                comp["inventor_file"] = result["assembly_path"]
+                self.project["change_history"].append({
+                    "timestamp": now(), "component_id": cmd["component_id"],
+                    "operation": "create_assembly_iam", "inventor_file": result["assembly_path"],
+                    "occurrence_count": result["occurrence_count"], "source": "ChatGPT manual",
+                    "applied_to_inventor": True
+                })
+                self.refresh_project_view()
+                if self.project_path: save_json(self.project_path, self.project)
+                else: self.save_project()
+                self.command_result.append("\\nĐÃ TẠO ASSEMBLY IAM: " + result["assembly_path"])
+                QMessageBox.information(self, "Hoàn tất", "Đã tạo Assembly IAM.\\n" + result["assembly_path"])
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi tạo IAM", str(e))
+            return
+
+        # Geometry operations are intentionally a single-command transaction in V0.6.
         if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}:
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
