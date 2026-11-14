@@ -431,6 +431,19 @@ class MainWindow(QMainWindow):
                 "direction": "positive",
                 "reason": "Tạo khối chữ nhật kiểm thử"
             },
+            "advanced_profile_command_schema": {
+                "op": "create_profile_extrude",
+                "component_id": "MÃ_CHI_TIẾT_CÓ_IPT_ĐÃ_GẮN",
+                "unit": "mm",
+                "plane": "XY",
+                "loops": [
+                    {"type": "polyline", "points": [[0,0],[120,0],[110,60],[0,60]]},
+                    {"type": "circle", "center_x": 30, "center_y": 30, "radius": 5}
+                ],
+                "distance": 8,
+                "operation": "new_body",
+                "direction": "positive"
+            },
             "circle_command_schema": {
                 "op": "create_circle_extrude",
                 "component_id": "MÃ_CHI_TIẾT_CÓ_IPT_ĐÃ_GẮN",
@@ -445,19 +458,23 @@ class MainWindow(QMainWindow):
             }
         }
         instruction = (
-            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor AI V0.5, Autodesk Inventor 2018. "
+            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor Local Edition V0.6, Autodesk Inventor 2018. "
             "Đọc hồ sơ JSON bên dưới và yêu cầu của người dùng. "
             "Với set_parameter, chỉ dùng component_id và parameter có sẵn trong hồ sơ. "
             "Với create_rectangle_extrude, tạo Sketch chữ nhật trên mặt phẳng XY và Extrude/Cut; bắt buộc có length, width, thickness và unit=mm. "
             "origin_x và origin_y là tọa độ góc đầu tiên từ gốc XY, mặc định 0 mm nếu người dùng không chỉ định. "
             "Với create_circle_extrude, tạo Sketch tròn có đường kính điều khiển và Extrude/Cut; bắt buộc có diameter, thickness và unit=mm. "
+            "Với create_profile_extrude, tạo profile tùy chỉnh gồm loops polyline/circle trên plane XY/XZ/YZ rồi Extrude/Cut; mọi tọa độ và distance phải lấy từ bản vẽ, unit=mm. "
+            "Với create_fillet/create_chamfer, chỉ dùng edge_indices 1-based đã được xác minh trên đúng phiên bản IPT hiện tại; không đoán số cạnh. "
+            "Với create_circular_pattern/create_rectangular_pattern, chỉ dùng feature_names và axis_index có thật trong IPT; rectangular pattern hiện một hướng. "
+            "Với create_assembly_iam, chỉ tạo IAM từ các IPT tồn tại, output_path mới và position_mm XYZ đã được xác định; không tự đoán ràng buộc lắp ghép. "
             "center_x và center_y là tọa độ tâm hình tròn, mặc định 0 mm nếu người dùng không chỉ định. "
             "operation chỉ được dùng auto, join, new_body hoặc cut; direction chỉ được dùng positive hoặc negative. "
-            "Mỗi gói JSON chỉ dùng một chế độ: set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh create_rectangle_extrude/create_circle_extrude. Không trộn hai loại lệnh. "
+            "Mỗi gói JSON chỉ chứa set_parameter (có thể nhiều lệnh) hoặc đúng một lệnh hình học/edge/pattern/assembly. Không trộn các thao tác. "
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "V0.6 chưa hỗ trợ native Hole, Fillet, Chamfer, Pattern hoặc xóa Feature; lỗ tròn đơn giản dùng create_circle_extrude với operation=cut."
+            "V0.6 hỗ trợ profile tùy chỉnh trên XY/XZ/YZ, Extrude/Cut, Fillet/Chamfer theo cạnh, Circular/Rectangular Pattern một trục và tạo IAM từ IPT có sẵn. Không tự đoán cạnh, trục, feature name, kích thước hay ràng buộc lắp ráp."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
