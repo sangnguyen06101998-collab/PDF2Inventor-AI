@@ -934,9 +934,15 @@ def analyze_pdf(
                     int(profile_path_id),
                     command.get("hole_vector_path_ids") or [],
                     float(scale_verification["mm_per_pt"]),
+                    command.get("inner_vector_path_ids") or [],
                 )
                 command["points"] = derived_profile["points"]
                 command["holes"] = derived_profile["holes"]
+                command["cutouts"] = derived_profile["cutouts"]
+                if derived_profile.get("curves_approximated"):
+                    result["warnings"] = list(result.get("warnings") or []) + [
+                        "Đường cong ngoài được chuyển thành các đoạn thẳng ngắn từ vector PDF để tạo Sketch; cần kiểm tra bề mặt cong sau khi dựng."
+                    ]
             except Exception as exc:
                 geometry_issues.append("Không chuyển được vector thành biên dạng CAD: " + str(exc))
         if result.get("confidence") != "high":
