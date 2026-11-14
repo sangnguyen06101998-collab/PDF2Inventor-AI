@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QLineEdit, QTabWidget, QInputDialog, QDialog
 )
 from inventor_bridge import InventorBridgeError, connect_inventor, get_active_document, get_document_by_path, get_document_info, read_parameters, apply_parameter_changes
-from inventor_geometry import create_rectangle_extrude, validate_rectangle_command
+from inventor_geometry import create_rectangle_extrude, validate_rectangle_command, create_circle_extrude, validate_circle_command
 
 APP_TITLE = "PDF2Inventor AI · V0.5 Sketch + Extrude"
 SCHEMA_VERSION = "0.2"
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("V0.5 hỗ trợ set_parameter và create_rectangle_extrude (Sketch chữ nhật có ràng buộc + Extrude). Chưa hỗ trợ Hole, Fillet, Chamfer hoặc IAM.")
+        warning = QLabel("V0.5 hỗ trợ set_parameter, Sketch chữ nhật/tròn, Extrude và Extrude Cut. Chưa hỗ trợ Fillet, Chamfer hoặc IAM.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") == "create_rectangle_extrude"]
+            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude"}]
             if geometry_commands and len(commands) != 1:
                 issues.append("Lệnh create_rectangle_extrude phải đứng riêng trong một gói JSON; không trộn với set_parameter hoặc lệnh hình học khác.")
             for i, cmd in enumerate(commands, 1):
