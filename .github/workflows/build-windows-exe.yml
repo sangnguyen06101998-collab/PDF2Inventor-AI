@@ -7,6 +7,7 @@ on:
     branches:
       - feature/v0.4-inventor-com
       - feature/v0.5-sketch-extrude
+      - feature/v0.6-local-edition
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
       - name: Check Python syntax and imports
         run: |
           python -m compileall -q .
-          python -c "import main; import inventor_geometry; print('PDF2Inventor V0.5 import OK')"
+          python -c "import main; import inventor_geometry; print('PDF2Inventor Local Edition V0.6 import OK')"
 
       - name: Run Inventor bridge unit tests
         run: python -m unittest discover -s tests -v
