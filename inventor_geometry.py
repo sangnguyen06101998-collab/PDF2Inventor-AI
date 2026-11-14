@@ -499,3 +499,300 @@ def create_circle_extrude(document, inventor_app, command):
         raise InventorBridgeError(
             "Không tạo được Sketch tròn/Extrude: " + detail + ". " + rollback_message + " Backup: " + str(backup)
         ) from exc
+
+
+def _cross(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _on_segment(a, b, p, eps=1e-8):
+    return (
+        min(a[0], b[0]) - eps <= p[0] <= max(a[0], b[0]) + eps
+        and min(a[1], b[1]) - eps <= p[1] <= max(a[1], b[1]) + eps
+        and abs(_cross(a, b, p)) <= eps
+    )
+
+
+def _segments_intersect(a, b, c, d):
+    o1, o2 = _cross(a, b, c), _cross(a, b, d)
+    o3, o4 = _cross(c, d, a), _cross(c, d, b)
+    eps = 1e-8
+    if ((o1 > eps and o2 < -eps) or (o1 < -eps and o2 > eps)) and (
+        (o3 > eps and o4 < -eps) or (o3 < -eps and o4 > eps)
+    ):
+        return True
+    return (
+        _on_segment(a, b, c)
+        or _on_segment(a, b, d)
+        or _on_segment(c, d, a)
+        or _on_segment(c, d, b)
+    )
+
+
+def _point_in_polygon(point, polygon):
+    x, y = point
+    inside = False
+    count = len(polygon)
+    for i in range(count):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % count]
+        if _on_segment((x1, y1), (x2, y2), point):
+            return False
+        if (y1 > y) != (y2 > y):
+            intersection_x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < intersection_x:
+                inside = not inside
+    return inside
+
+
+def _point_segment_distance(point, start, end):
+    px, py = point
+    x1, y1 = start
+    x2, y2 = end
+    dx, dy = x2 - x1, y2 - y1
+    length_sq = dx * dx + dy * dy
+    if length_sq <= 1e-16:
+        return math.hypot(px - x1, py - y1)
+    t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / length_sq))
+    closest = (x1 + t * dx, y1 + t * dy)
+    return math.hypot(px - closest[0], py - closest[1])
+
+
+def validate_profile_command(command):
+    """Validate a closed polygon profile with explicit circular through-holes."""
+    if not isinstance(command, dict) or command.get("op") != "create_profile_extrude":
+        raise InventorBridgeError("Lệnh biên dạng phải dùng op='create_profile_extrude'.")
+    if command.get("unit") != "mm":
+        raise InventorBridgeError("V0.6 yêu cầu unit='mm' cho biên dạng.")
+    thickness = _number(command.get("thickness"), "thickness", positive=True)
+    direction = str(command.get("direction", "positive")).strip().lower()
+    if direction not in {"positive", "negative"}:
+        raise InventorBridgeError("direction chỉ nhận positive hoặc negative.")
+
+    raw_points = command.get("points")
+    if not isinstance(raw_points, list) or not 3 <= len(raw_points) <= 200:
+        raise InventorBridgeError("Biên dạng ngoài cần từ 3 đến 200 điểm.")
+    points = []
+    for index, item in enumerate(raw_points, 1):
+        if not isinstance(item, dict):
+            raise InventorBridgeError(f"Điểm {index} phải có dạng đối tượng x/y.")
+        x = _number(item.get("x"), f"points[{index}].x")
+        y = _number(item.get("y"), f"points[{index}].y")
+        points.append((x, y))
+
+    if len(set(points)) < 3:
+        raise InventorBridgeError("Biên dạng ngoài phải có ít nhất 3 điểm khác nhau.")
+    for index in range(len(points)):
+        if math.dist(points[index], points[(index + 1) % len(points)]) <= 1e-6:
+            raise InventorBridgeError("Hai điểm liên tiếp của biên dạng không được trùng nhau.")
+
+    area2 = sum(
+        points[i][0] * points[(i + 1) % len(points)][1]
+        - points[(i + 1) % len(points)][0] * points[i][1]
+        for i in range(len(points))
+    )
+    if abs(area2) <= 1e-6:
+        raise InventorBridgeError("Diện tích biên dạng bằng 0 hoặc các điểm gần thẳng hàng.")
+
+    point_count = len(points)
+    for i in range(point_count):
+        a, b = points[i], points[(i + 1) % point_count]
+        for j in range(i + 1, point_count):
+            if j == i or j == (i + 1) % point_count or i == (j + 1) % point_count:
+                continue
+            c, d = points[j], points[(j + 1) % point_count]
+            if _segments_intersect(a, b, c, d):
+                raise InventorBridgeError("Biên dạng ngoài tự giao nhau; cần sửa thứ tự các điểm.")
+
+    raw_holes = command.get("holes") or []
+    if not isinstance(raw_holes, list) or len(raw_holes) > 50:
+        raise InventorBridgeError("Danh sách lỗ phải là mảng, tối đa 50 lỗ tròn.")
+    holes = []
+    for index, item in enumerate(raw_holes, 1):
+        if not isinstance(item, dict):
+            raise InventorBridgeError(f"Lỗ {index} phải có center_x, center_y, diameter.")
+        center = (
+            _number(item.get("center_x"), f"holes[{index}].center_x"),
+            _number(item.get("center_y"), f"holes[{index}].center_y"),
+        )
+        diameter = _number(item.get("diameter"), f"holes[{index}].diameter", positive=True)
+        radius = diameter / 2.0
+        if not _point_in_polygon(center, points):
+            raise InventorBridgeError(f"Tâm lỗ {index} nằm ngoài hoặc trên biên dạng.")
+        edge_clearance = min(
+            _point_segment_distance(center, points[i], points[(i + 1) % point_count])
+            for i in range(point_count)
+        )
+        if edge_clearance <= radius + 1e-6:
+            raise InventorBridgeError(f"Lỗ {index} chạm hoặc vượt ra ngoài biên dạng.")
+        for previous_index, previous in enumerate(holes, 1):
+            required = radius + previous["diameter"] / 2.0
+            if math.dist(center, (previous["center_x"], previous["center_y"])) <= required + 1e-6:
+                raise InventorBridgeError(f"Lỗ {index} giao hoặc chồng lên lỗ {previous_index}.")
+        holes.append({
+            "center_x": center[0],
+            "center_y": center[1],
+            "diameter": diameter,
+        })
+
+    parameter_names = command.get("parameter_names") or {}
+    if not isinstance(parameter_names, dict):
+        raise InventorBridgeError("parameter_names phải là một đối tượng JSON.")
+    thickness_name = str(parameter_names.get("thickness", "Thickness")).strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", thickness_name):
+        raise InventorBridgeError("Tên tham số Thickness không hợp lệ.")
+
+    return {
+        "points": points,
+        "holes": holes,
+        "thickness": thickness,
+        "direction": direction,
+        "parameter_names": {"thickness": thickness_name},
+        "unit": "mm",
+    }
+
+
+def create_profile_extrude(document, inventor_app, command):
+    """Create an editable planar polygon sketch with circular holes and extrude it."""
+    cfg = validate_profile_command(command)
+    info = get_document_info(document, inventor_app)
+    file_path = info.get("full_path", "")
+    if not file_path or Path(file_path).suffix.lower() != ".ipt" or not os.path.isfile(file_path):
+        raise InventorBridgeError("Lệnh biên dạng chỉ chạy trên file .ipt đã lưu và tồn tại.")
+
+    try:
+        document.Save()
+    except Exception as exc:
+        raise InventorBridgeError("Không lưu được IPT trước khi tạo backup: " + str(exc)) from exc
+    source = Path(file_path)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = source.with_name(source.stem + "_Before_PDF2Inventor_V06_" + stamp + source.suffix)
+    try:
+        shutil.copy2(source, backup)
+    except Exception as exc:
+        raise InventorBridgeError("Không tạo được bản sao dự phòng: " + str(exc)) from exc
+
+    transaction = None
+    save_attempted = False
+    try:
+        transaction = inventor_app.TransactionManager.StartTransaction(
+            document, "PDF2Inventor V0.6 - Profile Extrude"
+        )
+        component = document.ComponentDefinition
+        parameters = component.Parameters
+        user_parameters = parameters.UserParameters
+        thickness_name = _unique_parameter_name(
+            parameters, cfg["parameter_names"]["thickness"]
+        )
+        user_parameters.AddByExpression(
+            thickness_name, str(cfg["thickness"]) + " mm", "mm"
+        )
+
+        sketch = component.Sketches.Add(component.WorkPlanes.Item(3))
+        geometry = inventor_app.TransientGeometry
+        sketch_points = [
+            sketch.SketchPoints.Add(
+                geometry.CreatePoint2d(x / 10.0, y / 10.0), False
+            )
+            for x, y in cfg["points"]
+        ]
+        for index in range(len(sketch_points)):
+            sketch.SketchLines.AddByTwoPoints(
+                sketch_points[index],
+                sketch_points[(index + 1) % len(sketch_points)],
+            )
+        sketch.GeometricConstraints.AddGround(sketch_points[0])
+
+        hole_parameter_names = []
+        for index, hole in enumerate(cfg["holes"], 1):
+            center = sketch.SketchPoints.Add(
+                geometry.CreatePoint2d(
+                    hole["center_x"] / 10.0,
+                    hole["center_y"] / 10.0,
+                ),
+                False,
+            )
+            circle = sketch.SketchCircles.AddByCenterRadius(
+                center, hole["diameter"] / 20.0
+            )
+            sketch.GeometricConstraints.AddGround(center)
+            requested = "Hole" + str(index) + "_Diameter"
+            actual = _unique_parameter_name(parameters, requested)
+            user_parameters.AddByExpression(
+                actual, str(hole["diameter"]) + " mm", "mm"
+            )
+            diameter_dimension = sketch.DimensionConstraints.AddDiameter(
+                circle,
+                geometry.CreatePoint2d(
+                    (hole["center_x"] + hole["diameter"]) / 10.0,
+                    hole["center_y"] / 10.0,
+                ),
+                False,
+            )
+            diameter_dimension.Parameter.Expression = actual
+            hole_parameter_names.append(actual)
+
+        profile = sketch.Profiles.AddForSolid()
+        direction_enum = (
+            K_POSITIVE_EXTENT_DIRECTION
+            if cfg["direction"] == "positive"
+            else K_NEGATIVE_EXTENT_DIRECTION
+        )
+        extrudes = component.Features.ExtrudeFeatures
+        definition = extrudes.CreateExtrudeDefinition(profile, K_NEW_BODY_OPERATION)
+        definition.SetDistanceExtent(thickness_name, direction_enum)
+        extrude = extrudes.Add(definition)
+
+        try:
+            sketch.Name = "P2I_Profile_Sketch"
+            extrude.Name = "P2I_Profile_Extrude"
+            sketch.Visible = False
+        except Exception:
+            pass
+
+        document.Update()
+        save_attempted = True
+        document.Save()
+        transaction.End()
+        transaction = None
+
+        return {
+            "document_path": file_path,
+            "backup_path": str(backup),
+            "sketch_name": str(getattr(sketch, "Name", "P2I_Profile_Sketch")),
+            "feature_name": str(getattr(extrude, "Name", "P2I_Profile_Extrude")),
+            "operation": "new_body",
+            "direction": cfg["direction"],
+            "dimensions_mm": {
+                "thickness": cfg["thickness"],
+                "points": [
+                    {"x": point[0], "y": point[1]} for point in cfg["points"]
+                ],
+                "holes": cfg["holes"],
+            },
+            "parameter_names": {
+                "thickness": thickness_name,
+                "holes": hole_parameter_names,
+            },
+            "parameters": read_parameters(document),
+            "range_box": _range_box_mm(component),
+        }
+    except Exception as exc:
+        rollback_message = ""
+        if transaction is not None:
+            try:
+                transaction.Abort()
+                rollback_message = "Đã hủy transaction hình học trong Inventor."
+            except Exception as abort_exc:
+                rollback_message = "Không xác nhận được rollback transaction: " + str(abort_exc)
+        if save_attempted:
+            try:
+                shutil.copy2(backup, file_path)
+                rollback_message += " Đã khôi phục file trên ổ đĩa từ backup; hãy đóng IPT không lưu rồi mở lại."
+            except Exception as restore_exc:
+                rollback_message += " Không thể khôi phục file tự động: " + str(restore_exc)
+        detail = str(exc) if isinstance(exc, InventorBridgeError) else type(exc).__name__ + ": " + str(exc)
+        raise InventorBridgeError(
+            "Không tạo được Sketch biên dạng/Extrude: " + detail + ". "
+            + rollback_message + " Backup: " + str(backup)
+        ) from exc
