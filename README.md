@@ -1,43 +1,53 @@
-# PDF2Inventor Local Edition V0.6 · Offline vector-first PDF + Inventor 2018
+# PDF2Inventor Local Edition V0.6 · Offline vector-first CAD automation
 
-## Chức năng hiện có
-- Tạo, mở và lưu hồ sơ dự án JSON.
-- Mở và xem PDF cục bộ bằng PyMuPDF.
-- Phân tích PDF cục bộ: trích xuất text spans, vị trí chữ, ứng viên kích thước, vector paths và bounding box.
-- Xuất báo cáo JSON chứa dữ liệu vector/text để kiểm tra và xử lý tiếp.
-- Kết nối Autodesk Inventor đang chạy qua COM.
-- Đọc tham số của file IPT đang mở và liên kết IPT với chi tiết trong hồ sơ.
-- Nhận lệnh JSON set_parameter; ứng dụng xác nhận, tạo backup, cập nhật tham số, gọi Update và Save.
-- Nhận lệnh create_rectangle_extrude để tạo Sketch chữ nhật trên XY và Extrude.
-- Nhận lệnh create_circle_extrude để tạo Sketch tròn và Extrude/Cut.
-- Phân tích PDF chạy tại máy; không gọi OpenAI API, không gửi PDF ra mạng, không cần GPU.
+## Local PDF processing
+- Opens PDF locally with PyMuPDF.
+- Extracts selectable text, text span coordinates, dimension-like tokens, vector paths and page metrics.
+- Exports a JSON report. No OpenAI API, no PDF upload, no GPU requirement.
+- PDF point coordinates are not assumed to be millimetres. Drawing dimensions remain the authority for scale calibration.
+- Automatic full drawing-to-solid reconstruction is not claimed: ambiguous views, hidden geometry, missing dimensions and scan-only pages require additional interpretation/OCR.
 
-## V0.6 Local Edition · Cách phân tích PDF
-1. Chạy EXE trên Windows 64-bit.
-2. Mở tab PDF và chọn PDF bản vẽ.
-3. Nhấn **Phân tích PDF vector tại máy**.
-4. Kiểm tra số vector paths, text spans và các kích thước tìm được.
-5. Nhấn **Xuất báo cáo JSON** để lưu toàn bộ dữ liệu trích xuất.
+## Inventor 2018 native feature operations currently implemented
+- Rectangle and circle Sketch + Extrude/Cut.
+- create_profile_extrude: custom closed polyline/circle loops on origin planes XY, XZ or YZ, then Extrude/Join/New Body/Cut.
+- create_fillet: native constant-radius Fillet on explicit 1-based edge indices.
+- create_chamfer: native distance Chamfer on explicit 1-based edge indices.
+- create_circular_pattern: native circular feature pattern using named existing features and a work-axis index.
+- create_rectangular_pattern: native one-direction rectangular feature pattern using named existing features and a work-axis index.
+- create_assembly_iam: creates a new IAM and inserts existing IPT files at explicitly supplied XYZ positions in millimetres.
 
-## Nguyên tắc tỷ lệ và kích thước
-- Tọa độ PDF được trích xuất theo point (1/72 inch), không được tự coi là mm.
-- Kích thước ghi bằng số trên bản vẽ là nguồn chuẩn để hiệu chuẩn tỷ lệ.
-- V0.6 hiện chưa tự động ghép mọi đường bao thành biên dạng 2D và chưa tự suy ra chiều sâu 3D.
-- Không được dựng hình khi kích thước hoặc hình chiếu còn mơ hồ. Không tự đoán tỷ lệ, độ dày, lỗ khuất, ren, bo/vát hoặc cấu tạo lắp ráp.
-- Nếu PDF là ảnh scan, cần bổ sung OCR cục bộ; nhánh hiện tại ưu tiên PDF vector.
+## Advanced profile JSON example
+    {
+      "op": "create_profile_extrude", "component_id": "PART_001", "unit": "mm",
+      "plane": "XY",
+      "loops": [
+        {"type": "polyline", "points": [[0,0],[120,0],[110,60],[0,60]]},
+        {"type": "circle", "center_x": 30, "center_y": 30, "radius": 5}
+      ],
+      "distance": 8, "operation": "new_body", "direction": "positive"
+    }
 
-## Giới hạn dựng hình
-- Hình học Inventor hiện hỗ trợ Sketch chữ nhật/tròn và Extrude/Cut cơ bản.
-- Chưa hỗ trợ tự động dựng mọi biên dạng tự do, nhiều mặt phẳng, Fillet, Chamfer, Pattern, ren hoặc assembly IAM.
-- Kiểm thử CI xác nhận logic Python và khả năng build; không thay thế kiểm thử COM geometry trên Autodesk Inventor 2018 thật.
+## Fillet / Chamfer
+- Fillet: op=create_fillet, edge_indices=[1,2], radius=2, unit=mm.
+- Chamfer: op=create_chamfer, edge_indices=[3], distance=1, unit=mm.
 
-## Build EXE
-GitHub Actions workflow Build PDF2Inventor AI for Windows chạy trên nhánh feature/v0.6-local-edition. Khi build thành công, tải artifact PDF2Inventor_AI_Windows_x64 trong trang Actions.
+## Pattern
+- Circular: op=create_circular_pattern, feature_names=["Hole1"], axis_index=3, count=6, angle_deg=360, unit=mm.
+- Rectangular (one direction): op=create_rectangular_pattern, feature_names=["Rib1"], axis_index=1, count=4, spacing_mm=25, unit=mm.
 
-Người dùng cuối không cần cài Python. Máy build GitHub Actions tự cài Python, PySide6, PyMuPDF, pywin32 và PyInstaller.
+## IAM assembly
+- op=create_assembly_iam, output_path='C:/CAD/Assembly.iam'.
+- components is a list of {ipt_path, position_mm:[x,y,z], occurrence_name?}.
+- This currently places IPTs by translation; it does not create automatic mates, joints, rotational alignment or interference solving.
 
-## An toàn
-- Không sửa nhánh main; bản Local Edition phát triển trên nhánh feature/v0.6-local-edition.
-- Trước thao tác hình học, ứng dụng yêu cầu xác nhận.
-- Các thay đổi thật trên IPT tạo file backup bên cạnh file gốc.
-- Nếu tạo hình học thất bại, ứng dụng cố gắng hủy transaction và báo lỗi.
+## Safety and limitations
+- Each geometry, edge finishing, pattern or assembly command must be submitted in its own JSON package.
+- Fillet/chamfer edge indices are 1-based indices in the current body's Edges collection. They can change after topology changes; re-inspect the model before reusing them.
+- Pattern features must exist by exact feature name; work-axis indices must match the active IPT.
+- Custom profile creation currently supports straight polyline segments and circles; splines, arcs, loft, sweep, revolve, shell, sheet-metal folds, threads, variable fillets, multi-direction rectangular patterns and full automatic multi-feature reconstruction are not yet supported.
+- Every model edit makes a backup first and asks the user to confirm before applying.
+- GitHub Actions validates Python and packages the EXE; it cannot certify Inventor COM geometry. Real Inventor 2018 validation remains necessary.
+
+## Build
+- GitHub Actions builds a Windows x64 one-file EXE on pushes to feature/v0.6-local-edition.
+- Download artifact PDF2Inventor_AI_Windows_x64 from the Actions run after it completes.
