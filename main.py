@@ -657,7 +657,7 @@ class MainWindow(QMainWindow):
 
         geometry_ops = {
             "create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole",
-            "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"
+            "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"
         }
         if len(targets) > 1 and all(cmd.get("op") in geometry_ops for _, cmd in targets):
             comp = targets[0][0]
