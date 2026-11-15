@@ -1,63 +1,78 @@
-# PDF2Inventor Local Edition V0.6 · Offline vector-first CAD automation
+# PDF2Inventor Local Edition V0.9
 
-## Local PDF processing
-- Opens PDF locally with PyMuPDF.
-- Extracts selectable text, text span coordinates, dimension-like tokens, vector paths and page metrics.
-- Exports a JSON report. No OpenAI API, no PDF upload, no GPU requirement.
-- PDF point coordinates are not assumed to be millimetres. Drawing dimensions remain the authority for scale calibration.
-- Automatic full drawing-to-solid reconstruction is not claimed: ambiguous views, hidden geometry, missing dimensions and scan-only pages require additional interpretation/OCR.
+Offline-first desktop application for reading vector PDF mechanical drawings and creating editable native Autodesk Inventor 2018 features through the Inventor COM API.
 
-## Inventor 2018 native feature operations currently implemented
-- Rectangle and circle Sketch + Extrude/Cut.
-- create_profile_extrude: custom closed polyline/circle/line-and-arc loops on XY, XZ or YZ origin planes, including offset_mm parallel planes, then Extrude/Join/New Body/Cut.
-- create_hole: native drilled Hole feature with multiple sketch-point locations, through-all or blind depth.
-- create_thread: native standard thread on an existing cylindrical face using Inventor thread-table designation.
-- create_fillet: native constant-radius Fillet on explicit 1-based edge indices.
-- create_chamfer: native distance Chamfer on explicit 1-based edge indices.
-- create_circular_pattern: native circular feature pattern using named existing features and a work-axis index.
-- create_rectangular_pattern: native one- or two-direction rectangular feature pattern using named existing features and work-axis indices.
-- create_assembly_iam: creates a new IAM and inserts existing IPT files at explicitly supplied XYZ positions in millimetres.
+## Design principles
 
-## Advanced profile JSON example
-    {
-      "op": "create_profile_extrude", "component_id": "PART_001", "unit": "mm",
-      "plane": "XY",
-      "loops": [
-        {"type": "polyline", "points": [[0,0],[120,0],[110,60],[0,60]]},
-        {"type": "circle", "center_x": 30, "center_y": 30, "radius": 5}
-      ],
-      "distance": 8, "operation": "new_body", "direction": "positive"
-    }
+- No OpenAI API key, paid AI endpoint, cloud upload or GPU is required for local PDF analysis.
+- PDF files are analyzed locally with PyMuPDF.
+- PDF coordinates remain PDF points (1/72 inch). They are never silently treated as millimetres.
+- Drawing dimensions, scale calibration, extrusion depth and feature intent must be explicit. The software must not invent missing geometry.
+- Every model-changing operation asks for user confirmation and saves a backup before editing the IPT/IAM.
 
-## Fillet / Chamfer
-- Native hole: op=create_hole, plane=XY, offset_mm=12, centers=[[20,20],[80,20]], diameter=8, extent=through_all, unit=mm.
-- Standard thread: op=create_thread, face_index=2, start_edge_index=1, designation=M8x1.25, thread_type=ISO Metric Profile, thread_class=6H, internal=true, full_depth=true, unit=mm.
-- Fillet: op=create_fillet, edge_indices=[1,2], radius=2, unit=mm.
-- Chamfer: op=create_chamfer, edge_indices=[3], distance=1, unit=mm.
+## Native Inventor 2018 features
 
-## Pattern
-- Circular: op=create_circular_pattern, feature_names=["Hole1"], axis_index=3, count=6, angle_deg=360, unit=mm.
-- Rectangular (one or two directions): op=create_rectangular_pattern, feature_names=["Rib1"], axis_index=1, count=4, spacing_mm=25, count_y=3, axis_y_index=2, spacing_y_mm=30, unit=mm.
+### Part features
 
-## IAM assembly
-- op=create_assembly_iam, output_path='C:/CAD/Assembly.iam'.
-- components is a list of {ipt_path, position_mm:[x,y,z], occurrence_name?}.
-- This currently places IPTs by translation; it does not create automatic mates, joints, rotational alignment or interference solving.
+- Rectangle/Circle Sketch + Extrude/Cut.
+- Custom closed profile extrude: polyline, circle and line/arc segment loops on XY, XZ or YZ origin planes; optional parallel offset plane.
+- Revolve: closed section profile around an explicit sketch axis, full 360 degrees or a specified partial angle. This is suitable for turned components such as shafts, bushes and pulleys when the section and axis are known.
+- Control-point spline profile extrude: closed 2D spline boundary with explicit control points.
+- Sweep: existing named profile Sketch swept along a selected line, arc or spline in an existing named path Sketch.
+- Loft: two or more existing section Sketches in explicitly supplied order.
+- Hole: native drilled feature from explicit sketch point centres; through-all or blind depth.
+- Standard Thread: native thread on a selected cylindrical face with explicit thread-table designation and start edge.
+- Fillet and Chamfer: native edge finishing features using current 1-based edge indices.
+- Circular and one-/two-direction rectangular feature patterns.
+- Shell: explicit thickness and optional faces to remove.
+- Mirror: named existing features mirrored about an explicit work plane.
 
-## Safety and limitations
-- Each geometry, edge finishing, pattern or assembly command must be submitted in its own JSON package.
-- Fillet/chamfer edge indices are 1-based indices in the current body's Edges collection. They can change after topology changes; re-inspect the model before reusing them.
-- Pattern features must exist by exact feature name; work-axis indices must match the active IPT.
-- Thread face/edge indices and fillet/chamfer edge indices must be read from the current model topology. These indices can change after editing features.
-- The Inventor tab includes a read-only B-rep face/edge inventory for identifying current face and edge indices.
-- Custom profile creation currently supports straight polyline segments and circles; splines, arcs, loft, sweep, revolve, shell, sheet-metal folds, variable fillets and full automatic multi-feature reconstruction are not yet supported.
-- Threading is native standard-thread feature creation on a selected cylindrical face; it does not yet auto-detect all thread callouts or choose faces without topology review.
-- Every model edit makes a backup first and asks the user to confirm before applying.
-- GitHub Actions validates Python and packages the EXE; it cannot certify Inventor COM geometry. Real Inventor 2018 validation remains necessary.
+### IAM assembly
 
-## Build
-- GitHub Actions builds a Windows x64 one-file EXE on pushes to feature/v0.6-local-edition.
-- Download artifact PDF2Inventor_AI_Windows_x64 from the Actions run after it completes.
+- Create a new IAM by inserting existing IPT documents at explicit XYZ translations in millimetres.
+- Add native Mate and Flush constraints using explicitly identified planar faces/work planes.
+- Add native Insert constraints using explicitly identified circular edges.
+- Analyze interference between all or selected component occurrences and report the interfering pair and overlap volume.
+- Constraint entities must be read from the current assembly/model topology. Indexes may change after model edits. Insert is restricted to circular edges. Automatic rotational alignment, axis inference, joint authoring and automatic constraint solving from drawing intent are not claimed.
 
-## Ordered multi-feature plans
-A command package may contain several geometry operations in sequence when all commands target the same component_id and IPT. Each feature creates its own backup. If any step fails, execution stops and reports completed steps and backups; earlier successful steps remain applied until restored from backup.
+## PDF vector to Feature planner
+
+The PDF tab includes **Tạo Feature từ vector kín**.
+
+1. Open the source vector PDF and analyze it locally.
+2. Select one or more recognized closed line/rectangle paths from the current page.
+3. Select whether the first selected boundary is calibrated by its horizontal or vertical extent, then enter the matching dimension printed on the drawing. The app calculates mm per PDF point from that explicit measurement.
+4. Enter the actual Extrude depth in millimetres.
+5. Select the target IPT component and sketch plane.
+6. The application creates the Feature command package, validates it, and opens the CAD command review tab for confirmation.
+
+The planner deliberately supports a conservative subset only:
+- Closed vector outlines made from straight line segments or PDF rectangle primitives.
+- The user selects path indices; the software does not decide which outline is the intended part profile.
+- The scale factor and depth are explicit user inputs. Textual dimension candidates extracted from the page are not yet automatically associated with dimension lines or applied to the generated geometry.
+- It does not yet interpret hidden lines, section views, multi-view correspondence, dimension arrows, arcs/circles/splines, thread callouts or assembly positions into a complete manufacturing model.
+- Raster/scan-only pages are not converted into geometry by this planner.
+
+The PDF planner is therefore an assisted vector-to-Feature workflow, not a fully autonomous drawing-to-3D reconstruction engine. It is designed to avoid silently scaling or dimensioning a model incorrectly.
+
+## Command packages and safety
+
+- Native CAD commands are validated before execution.
+- Part Feature chains can contain multiple commands in order when they target the same component and IPT.
+- Each step creates its own backup and commits/saves separately. If a later step fails, earlier completed steps remain applied; restore the corresponding backup files to roll back.
+- Assembly constraints and interference analysis are standalone commands and target a saved IAM component.
+- Face, edge, path, feature and work-plane indices are 1-based and must refer to the current model revision.
+- Loft profiles must exist as closed section Sketches in the IPT. Sweep profile and path Sketches must exist and the selected path curve must be valid and connected.
+- Revolve profile geometry must be a valid closed section that does not create self-intersection or invalid geometry around the specified axis.
+- Spline profile creation currently supports closed control-point splines. Arbitrary open freeform surfaces and spline-based 3D reconstruction from orthographic drawings are not implemented.
+
+## Build Windows x64 EXE
+
+GitHub Actions builds the standalone EXE for branch \`feature/v0.9-complete\`.
+
+- Workflow: \`.github/workflows/build-windows-exe.yml\`
+- Artifact name: \`PDF2Inventor_AI_V0_9_Windows_x64\`
+- Executable in the artifact: \`PDF2Inventor_AI_V0_9.exe\`
+- Runtime target: Windows x64, Autodesk Inventor 2018 installed locally for COM operations.
+
+The GitHub Actions job checks Python compilation/imports, runs offline unit tests and packages the application. The build pipeline cannot launch Autodesk Inventor 2018 or verify actual COM geometry operations. Real Inventor feature execution must be validated on a Windows machine with Inventor 2018.

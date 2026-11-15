@@ -1,5 +1,5 @@
 
-name: Build PDF2Inventor AI for Windows
+name: Build PDF2Inventor Local Edition V0.9 for Windows
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
       - feature/v0.4-inventor-com
       - feature/v0.5-sketch-extrude
       - feature/v0.6-local-edition
+      - feature/v0.9-complete
 
 permissions:
   contents: read
@@ -34,15 +35,15 @@ jobs:
       - name: Check Python syntax and imports
         run: |
           python -m compileall -q .
-          python -c "import main; import inventor_geometry; print('PDF2Inventor Local Edition V0.6 import OK')"
+          python -c "import main; import inventor_geometry; import inventor_revolve; import inventor_v09_features; import inventor_assembly_advanced; import pdf_feature_planner; print('PDF2Inventor Local Edition V0.9 import OK')"
 
-      - name: Run Inventor bridge unit tests
+      - name: Run offline unit tests
         run: python -m unittest discover -s tests -v
 
       - name: Build EXE
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
-          --name PDF2Inventor_AI
+          --name PDF2Inventor_AI_V0_9
           --collect-all PySide6
           --collect-all fitz
           --hidden-import win32com
@@ -54,6 +55,6 @@ jobs:
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: PDF2Inventor_AI_Windows_x64
-          path: dist/PDF2Inventor_AI.exe
+          name: PDF2Inventor_AI_V0_9_Windows_x64
+          path: dist/PDF2Inventor_AI_V0_9.exe
           if-no-files-found: error

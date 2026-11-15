@@ -19,8 +19,15 @@ from inventor_assembly import create_assembly_iam, validate_assembly_command
 from inventor_holes import create_hole, validate_hole_command
 from inventor_threads import create_thread, validate_thread
 from inventor_topology import inspect_topology
+from inventor_revolve import create_revolve, validate_revolve
+from inventor_v09_features import ADVANCED_PART_OPS, create_advanced_part, validate_advanced_part
+from inventor_assembly_advanced import (
+    create_assembly_constraints, validate_assembly_constraints,
+    analyze_assembly_interference, validate_interference
+)
+from pdf_feature_planner import list_closed_profile_candidates, build_pdf_feature_plan
 
-APP_TITLE = "PDF2Inventor Local Edition · V0.6"
+APP_TITLE = "PDF2Inventor Local Edition · V0.9"
 SCHEMA_VERSION = "0.2"
 
 def now():
@@ -38,7 +45,7 @@ def default_project():
         "change_history": [],
         "notes": [
             "Chỉ đưa cho ChatGPT thông tin cần thiết; không gửi PDF nếu không cần.",
-            "V0.6 xử lý PDF vector cục bộ; mọi thay đổi hình học Inventor phải được xác nhận trước khi áp dụng."
+            "V0.9 xử lý PDF vector tại máy, lập Feature từ đường bao đã chọn và áp dụng Feature native vào Inventor 2018 sau khi xác nhận."
         ]
     }
 
@@ -70,7 +77,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.build_command_tab(), "Nhập lệnh CAD")
         self.tabs = tabs
         self.refresh_project_view()
-        self.statusBar().showMessage("V0.6 LOCAL · Không cần API · Inventor 2018 COM")
+        self.statusBar().showMessage("V0.9 LOCAL · Không cần API · Inventor 2018 COM")
 
     def build_project_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
@@ -99,7 +106,7 @@ class MainWindow(QMainWindow):
         rl.addWidget(self.project_view)
         split.addWidget(left); split.addWidget(right); split.setSizes([350, 850])
         root.addWidget(split, 1)
-        note = QLabel("V0.6 Local: đọc vector PDF tại máy; dựng hình cơ bản trên IPT sau khi người dùng xác nhận.")
+        note = QLabel("V0.9 Local: phân tích vector tại máy; tạo Feature có kiểm soát; kích thước phải được hiệu chuẩn rõ ràng.")
         note.setStyleSheet("color:#b45309;")
         root.addWidget(note)
         return w
@@ -127,8 +134,11 @@ class MainWindow(QMainWindow):
         analyze_btn.clicked.connect(self.analyze_current_pdf)
         save_report_btn = QPushButton("Xuất báo cáo JSON")
         save_report_btn.clicked.connect(self.export_pdf_analysis)
+        auto_plan_btn = QPushButton("Tạo Feature từ vector kín")
+        auto_plan_btn.clicked.connect(self.make_pdf_feature_plan)
         analysis_row.addWidget(analyze_btn)
         analysis_row.addWidget(save_report_btn)
+        analysis_row.addWidget(auto_plan_btn)
         root.addLayout(analysis_row)
         self.pdf_analysis_view = QTextEdit()
         self.pdf_analysis_view.setReadOnly(True)
@@ -175,7 +185,7 @@ class MainWindow(QMainWindow):
         self.command_result = QTextEdit(); self.command_result.setReadOnly(True)
         self.command_result.setPlaceholderText("Kết quả kiểm tra và lịch sử thay đổi.")
         root.addWidget(self.command_result, 1)
-        warning = QLabel("V0.6 không dùng OpenAI API. Dựng hình hiện hỗ trợ set_parameter, Sketch chữ nhật/tròn, Extrude/Cut cơ bản; chưa tự động dựng mọi chi tiết phức tạp.")
+        warning = QLabel("V0.9 Local không dùng OpenAI API. Có Revolve, Sweep/Loft theo Sketch có sẵn, spline kín, Shell/Mirror và ràng buộc IAM; PDF tự tạo Feature hiện yêu cầu chọn đường bao và hiệu chuẩn kích thước.")
         warning.setStyleSheet("color:#b91c1c;font-weight:600;")
         root.addWidget(warning)
         return w
@@ -183,7 +193,7 @@ class MainWindow(QMainWindow):
 
     def build_inventor_tab(self):
         w = QWidget(); root = QVBoxLayout(w)
-        label = QLabel("Mở một file IPT đã lưu trong Inventor 2018, kết nối để đọc tham số và liên kết với chi tiết. V0.5 có thể dựng Sketch chữ nhật và Extrude trực tiếp trên IPT này.")
+        label = QLabel("Mở một file IPT/IAM đã lưu trong Inventor 2018, kết nối để đọc tham số, topology và áp dụng Feature native V0.9.")
         label.setWordWrap(True); root.addWidget(label)
         self.inv_status = QLabel("Chưa kết nối Inventor.")
         root.addWidget(self.inv_status)
@@ -356,6 +366,7 @@ class MainWindow(QMainWindow):
             d = fitz.open(path)
             if self.pdf: self.pdf.close()
             self.pdf = d; self.pdf_path = path
+            self.pdf_analysis = None
             self.project["source_pdf"] = os.path.basename(path)
             self.pdf_label.setText(os.path.basename(path))
             self.page_list.clear()
@@ -409,6 +420,125 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Lỗi lưu báo cáo", str(e))
 
+    def make_pdf_feature_plan(self):
+        """Create a conservative Inventor Feature command from selected closed PDF vectors."""
+        try:
+            if not self.pdf_path:
+                raise ValueError("Hãy mở PDF trước.")
+            if not getattr(self, "pdf_analysis", None):
+                self.analyze_current_pdf()
+            report = getattr(self, "pdf_analysis", None)
+            if not report:
+                return
+            page_number = int(self.page_index) + 1
+            candidates = list_closed_profile_candidates(report, page_number)
+            if not candidates:
+                raise ValueError(
+                    "Trang hiện tại chưa có đường bao vector kín dạng line/rectangle phù hợp. "
+                    "Đường cong, ảnh scan và nét chưa khép kín không được tự đoán."
+                )
+            candidate_lines = [
+                f'Path {item["path_index"]}: {item["point_count"]} điểm · BBox {item["bbox_pt"]} pt'
+                for item in candidates
+            ]
+            available = {item["path_index"] for item in candidates}
+            text_value, ok = QInputDialog.getText(
+                self, "Chọn đường bao PDF",
+                "Nhập chỉ số Path cần chuyển (cách nhau bằng dấu phẩy):\n" + "\n".join(candidate_lines[:80]),
+                QLineEdit.Normal, str(candidates[0]["path_index"])
+            )
+            if not ok:
+                return
+            raw = text_value.replace(";", ",").split(",")
+            path_indices = []
+            for token in raw:
+                token = token.strip()
+                if token:
+                    if not token.isdigit():
+                        raise ValueError("Path index chỉ nhận số nguyên dương.")
+                    path_indices.append(int(token))
+            if not path_indices or any(index not in available for index in path_indices):
+                raise ValueError("Có Path index không nằm trong danh sách đường bao kín được nhận diện.")
+            reference = next(item for item in candidates if item["path_index"] == path_indices[0])
+            box = reference["bbox_pt"]
+            width_pt = float(box[2]) - float(box[0])
+            height_pt = float(box[3]) - float(box[1])
+            axis_label, ok = QInputDialog.getItem(
+                self, "Chọn kích thước hiệu chuẩn",
+                f"Path {path_indices[0]} được dùng để hiệu chuẩn. BBox: ngang {width_pt:.4f} pt × cao {height_pt:.4f} pt. Chọn kích thước ghi trên bản vẽ:",
+                ["Chiều ngang (X)", "Chiều cao (Y)"], 0, False
+            )
+            if not ok:
+                return
+            span_pt = width_pt if axis_label.startswith("Chiều ngang") else height_pt
+            if span_pt <= 0:
+                raise ValueError("Không thể hiệu chuẩn từ BBox có chiều dài bằng 0.")
+            actual_mm, ok = QInputDialog.getDouble(
+                self, "Kích thước thực trên bản vẽ",
+                f"Nhập kích thước thực (mm) tương ứng với {span_pt:.4f} PDF point. Chọn đúng kích thước ghi trên bản vẽ và đúng cạnh bao:",
+                100.0, 0.0001, 1000000.0, 4
+            )
+            if not ok:
+                return
+            scale = actual_mm / span_pt
+            depth, ok = QInputDialog.getDouble(
+                self, "Chiều sâu Feature",
+                "Nhập chiều sâu Extrude (mm). Phần mềm không tự suy đoán chiều sâu từ hình chiếu:",
+                10.0, 0.0001, 1000000.0, 4
+            )
+            if not ok:
+                return
+            eligible = [
+                c for c in self.project.get("components", [])
+                if str(c.get("inventor_file", "")).lower().endswith(".ipt")
+            ]
+            if not eligible:
+                raise ValueError("Hồ sơ dự án chưa có chi tiết nào được liên kết file IPT.")
+            labels = [
+                f'{c.get("component_id", "")} — {c.get("name", c.get("component_name", "Chi tiết"))}'
+                for c in eligible
+            ]
+            selected, ok = QInputDialog.getItem(
+                self, "Chi tiết đích", "Chọn chi tiết IPT nhận Feature:", labels, 0, False
+            )
+            if not ok or not selected:
+                return
+            component = eligible[labels.index(selected)]
+            plane, ok = QInputDialog.getItem(
+                self, "Mặt phẳng dựng hình", "Chọn mặt phẳng sketch:", ["XY", "XZ", "YZ"], 0, False
+            )
+            if not ok:
+                return
+            plan = build_pdf_feature_plan(
+                report, page_number, path_indices, scale, depth,
+                component["component_id"], plane=plane, operation="new_body"
+            )
+            package = {
+                "project_id": self.project.get("project_id"),
+                "commands": plan["commands"],
+                "questions": [],
+                "warnings": plan["warnings"],
+                "pdf_feature_plan": {
+                    "source_file": plan["source_file"],
+                    "page_number": page_number,
+                    "calibration": plan["calibration"],
+                    "calibration_reference": {
+                        "path_index": path_indices[0], "axis": axis_label,
+                        "actual_dimension_mm": actual_mm, "span_pt": span_pt
+                    },
+                    "selected_vector_path_indices": plan["selected_vector_path_indices"],
+                    "automatic_inference": plan["automatic_inference"]
+                }
+            }
+            self.command_text.setPlainText(json.dumps(package, ensure_ascii=False, indent=2))
+            self.validate_commands()
+            self.tabs.setCurrentIndex(self.tabs.count() - 1)
+            self.statusBar().showMessage(
+                "Đã lập lệnh Feature từ vector PDF. Kiểm tra bản xem trước trước khi áp dụng."
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Không lập được Feature từ PDF", str(exc))
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.pdf: self.show_page(self.page_index)
@@ -416,7 +546,7 @@ class MainWindow(QMainWindow):
     def build_context_text(self):
         self.update_project_name()
         context = {
-            "purpose": "Hiểu dự án CAD và tạo lệnh sửa tham số hoặc dựng hình học cơ bản trong Inventor 2018. Không tự giả định kích thước còn thiếu.",
+            "purpose": "PDF2Inventor Local Edition V0.9: dựng hình học native trong Inventor 2018; không tự giả định kích thước, tỷ lệ hoặc chiều sâu còn thiếu.",
             "project": self.project,
             "command_schema": {
                 "project_id": self.project["project_id"],
@@ -471,7 +601,7 @@ class MainWindow(QMainWindow):
             }
         }
         instruction = (
-            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor Local Edition V0.6, Autodesk Inventor 2018. "
+            "Bạn là trợ lý thiết kế cơ khí cho PDF2Inventor Local Edition V0.9, Autodesk Inventor 2018. "
             "Đọc hồ sơ JSON bên dưới và yêu cầu của người dùng. "
             "Với set_parameter, chỉ dùng component_id và parameter có sẵn trong hồ sơ. "
             "Với create_rectangle_extrude, tạo Sketch chữ nhật trên mặt phẳng XY và Extrude/Cut; bắt buộc có length, width, thickness và unit=mm. "
@@ -480,16 +610,22 @@ class MainWindow(QMainWindow):
             "Với create_profile_extrude, tạo profile tùy chỉnh gồm loops polyline/circle/segments line-arc/segments line-arc trên plane XY/XZ/YZ, có offset_mm rồi Extrude/Cut; mọi tọa độ và distance phải lấy từ bản vẽ, unit=mm. "
             "Với create_hole, dùng native HoleFeature với centers [[x,y],...], diameter, plane, offset_mm, extent through_all hoặc distance, depth_mm nếu là lỗ mù, direction và unit=mm. "
             "Với create_thread, chỉ tạo ren trên mặt trụ đã có, dùng face_index và start_edge_index được xác minh, designation và thread_type đúng bảng ren Inventor; không tự suy ra M size từ đường kính nếu chưa rõ. "
+            "Với create_revolve, dùng profile kín và axis_points trong cùng sketch; mọi tọa độ, góc và trục quay phải xác định rõ bằng mm. "
+            "Với create_spline_profile_extrude, spline phải đóng kín và control_points phải lấy từ hình học đã xác nhận. "
+            "Với create_sweep/create_loft, chỉ tham chiếu Sketch profile/path/sections đã tồn tại và đúng thứ tự; không tự tạo đường dẫn từ nét chưa xác định. "
+            "Với create_shell/create_mirror, chỉ dùng face_indices, feature_names và work_plane_index đã đọc từ IPT hiện tại. "
             "Với create_fillet/create_chamfer, chỉ dùng edge_indices 1-based đã được xác minh trên đúng phiên bản IPT hiện tại; không đoán số cạnh. "
             "Với create_circular_pattern/create_rectangular_pattern, chỉ dùng feature_names và axis_index có thật trong IPT; rectangular pattern hỗ trợ một hoặc hai hướng. "
-            "Với create_assembly_iam, chỉ tạo IAM từ các IPT tồn tại, output_path mới và position_mm XYZ đã được xác định; không tự đoán ràng buộc lắp ghép. "
+            "Với create_assembly_iam, chỉ tạo IAM từ các IPT tồn tại, output_path mới và position_mm XYZ đã được xác định. "
+            "Với create_assembly_constraints, entity phải tham chiếu occurrence và face/edge/workplane index đã được kiểm tra; Insert chỉ dùng cạnh tròn đồng trục. "
+            "Với analyze_assembly_interference, kiểm tra các occurrence đã chọn hoặc toàn bộ IAM; không tự sửa vị trí chi tiết. "
             "center_x và center_y là tọa độ tâm hình tròn, mặc định 0 mm nếu người dùng không chỉ định. "
-            "operation chỉ được dùng auto, join, new_body hoặc cut; direction chỉ được dùng positive hoặc negative. "
+            "Với Extrude operation dùng auto, join, new_body hoặc cut; Revolve/Sweep/Loft có operation riêng theo loại Feature. Direction chỉ dùng positive hoặc negative khi lệnh hỗ trợ. "
             "Có thể gửi nhiều lệnh hình học theo thứ tự trong cùng một gói nếu tất cả cùng component_id và cùng IPT; mỗi bước có backup riêng, nếu lỗi thì dừng chuỗi. Không trộn set_parameter vào chuỗi hình học. Lệnh IAM phải đứng riêng. "
             "Không tự bịa kích thước, không tự đổi đơn vị ngầm định. Nếu thiếu hoặc mơ hồ, trả commands rỗng và ghi câu hỏi vào questions. "
             "Nếu thay đổi ảnh hưởng các chi tiết lắp ráp, ghi cảnh báo vào warnings. "
             "Chỉ trả về một JSON hợp lệ, không Markdown, không giải thích bên ngoài JSON. "
-            "V0.6 hỗ trợ profile tùy chỉnh gồm cung tròn trên XY/XZ/YZ, offset plane, native Hole, ren tiêu chuẩn, Extrude/Cut, Fillet/Chamfer, Circular Pattern, Rectangular Pattern hai hướng và tạo IAM từ IPT có sẵn. Không tự đoán cạnh, trục, feature name, kích thước hay ràng buộc lắp ráp."
+            "V0.9 hỗ trợ Revolve, spline profile kín, Sweep, Loft, Shell, Mirror, Mate/Flush/Insert và phân tích va chạm IAM. Sweep/Loft cần Sketch có sẵn; các chỉ số face/edge/feature phải lấy từ topology hiện tại. Bộ tạo Feature từ PDF chỉ nhận đường bao kín line/rectangle đã chọn, với mm/point và chiều sâu do người dùng hiệu chuẩn/nhập; chưa tự phân loại hình chiếu, hidden lines hoặc suy ra chiều sâu."
         )
         return instruction + "\n\n--- CAD PROJECT CONTEXT ---\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
@@ -531,13 +667,22 @@ class MainWindow(QMainWindow):
             data = self.parse_commands()
             issues = []
             commands = data.get("commands", [])
-            geometry_commands = [cmd for cmd in commands if isinstance(cmd, dict) and cmd.get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole", "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern", "create_assembly_iam"}]
+            known_geometry_ops = {
+                "create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude",
+                "create_hole", "create_thread", "create_fillet", "create_chamfer",
+                "create_circular_pattern", "create_rectangular_pattern", "create_assembly_iam",
+                "create_revolve", "create_assembly_constraints", "analyze_assembly_interference"
+            } | ADVANCED_PART_OPS
+            geometry_commands = [
+                cmd for cmd in commands
+                if isinstance(cmd, dict) and cmd.get("op") in known_geometry_ops
+            ]
             if geometry_commands and len(geometry_commands) != len(commands):
                 issues.append("Không được trộn lệnh hình học với set_parameter trong cùng gói JSON.")
             if geometry_commands and len({cmd.get("component_id") for cmd in geometry_commands}) != 1:
                 issues.append("Một chuỗi Feature chỉ được tác động lên một chi tiết IPT.")
-            if any(cmd.get("op") == "create_assembly_iam" for cmd in geometry_commands) and len(commands) != 1:
-                issues.append("Lệnh tạo IAM phải đứng riêng trong một gói JSON.")
+            if any(cmd.get("op") in {"create_assembly_iam", "create_assembly_constraints", "analyze_assembly_interference"} for cmd in geometry_commands) and len(commands) != 1:
+                issues.append("Lệnh IAM (tạo assembly, ràng buộc hoặc phân tích va chạm) phải đứng riêng trong một gói JSON.")
             for i, cmd in enumerate(commands, 1):
                 if not isinstance(cmd, dict):
                     issues.append(f"Lệnh {i}: mỗi phần tử commands phải là một đối tượng JSON.")
@@ -604,13 +749,41 @@ class MainWindow(QMainWindow):
                         validate_pattern(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_revolve":
+                    if not comp.get("inventor_file") or not str(comp.get("inventor_file", "")).lower().endswith(".ipt"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_revolve(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
+                elif op in ADVANCED_PART_OPS:
+                    if not comp.get("inventor_file") or not str(comp.get("inventor_file", "")).lower().endswith(".ipt"):
+                        issues.append(f'Lệnh {i}: chi tiết {cmd.get("component_id")} chưa được gắn với file IPT.')
+                    try:
+                        validate_advanced_part(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
                 elif op == "create_assembly_iam":
                     try:
                         validate_assembly_command(cmd)
                     except Exception as e:
                         issues.append(f"Lệnh {i}: {e}")
+                elif op == "create_assembly_constraints":
+                    if not str(comp.get("inventor_file", "")).lower().endswith(".iam"):
+                        issues.append(f'Lệnh {i}: component_id phải liên kết với file IAM đã lưu.')
+                    try:
+                        validate_assembly_constraints(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
+                elif op == "analyze_assembly_interference":
+                    if not str(comp.get("inventor_file", "")).lower().endswith(".iam"):
+                        issues.append(f'Lệnh {i}: component_id phải liên kết với file IAM đã lưu.')
+                    try:
+                        validate_interference(cmd)
+                    except Exception as e:
+                        issues.append(f"Lệnh {i}: {e}")
                 else:
-                    issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.6.")
+                    issues.append(f"Lệnh {i}: thao tác '{op}' chưa được hỗ trợ trong V0.9.")
             if not commands and not data.get("questions"):
                 issues.append("Không có lệnh hoặc câu hỏi nào.")
             self.pending_commands = data
@@ -666,10 +839,63 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Lỗi tạo IAM", str(e))
             return
 
+        if targets and targets[0][1].get("op") in {"create_assembly_constraints", "analyze_assembly_interference"}:
+            comp, cmd = targets[0]
+            path = comp.get("inventor_file")
+            try:
+                if self.inventor_app is None:
+                    self.inventor_app = connect_inventor()
+                doc = get_document_by_path(self.inventor_app, path)
+                if doc is None:
+                    raise InventorBridgeError("Hãy mở đúng file IAM đã liên kết trong Inventor.")
+                if cmd["op"] == "create_assembly_constraints":
+                    title = "Xác nhận ràng buộc IAM"
+                    description = (
+                        f"Sẽ thêm {len(cmd['constraints'])} ràng buộc Mate/Flush/Insert vào IAM. "
+                        "Entity index phải đúng theo B-rep hiện tại.\n" + str(path)
+                    )
+                else:
+                    title = "Xác nhận kiểm tra va chạm"
+                    description = (
+                        "Sẽ phân tích giao thoa hình học giữa các occurrence trong IAM.\n" + str(path)
+                    )
+                if QMessageBox.question(self, title, description + "\n\nTiếp tục?") != QMessageBox.Yes:
+                    return
+                if cmd["op"] == "create_assembly_constraints":
+                    result = create_assembly_constraints(doc, self.inventor_app, cmd)
+                    operation = cmd["op"]
+                    backup = result.get("backup_path")
+                    detail = f"Đã thêm {result['constraints_added']} ràng buộc."
+                else:
+                    result = analyze_assembly_interference(doc, self.inventor_app, cmd)
+                    operation = cmd["op"]
+                    backup = None
+                    detail = (
+                        f"Đã kiểm tra {len(result['checked_occurrences'])} occurrence; "
+                        f"phát hiện {result['interference_count']} vùng giao thoa."
+                    )
+                self.project["change_history"].append({
+                    "timestamp": now(), "component_id": cmd["component_id"],
+                    "operation": operation, "inventor_file": path,
+                    "backup_file": backup, "result": result,
+                    "source": "PDF2Inventor V0.9", "applied_to_inventor": True
+                })
+                self.inv_log.append(detail + "\n" + json.dumps(result, ensure_ascii=False, indent=2))
+                self.refresh_project_view()
+                if self.project_path:
+                    save_json(self.project_path, self.project)
+                else:
+                    self.save_project()
+                QMessageBox.information(self, "Hoàn tất", detail)
+            except Exception as exc:
+                QMessageBox.critical(self, "Lỗi Assembly IAM", str(exc))
+            return
+
         geometry_ops = {
             "create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole",
-            "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"
-        }
+            "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern",
+            "create_rectangular_pattern", "create_revolve"
+        } | ADVANCED_PART_OPS
         if len(targets) > 1 and all(cmd.get("op") in geometry_ops for _, cmd in targets):
             comp = targets[0][0]
             if any(item[0] is not comp for item in targets):
@@ -703,6 +929,10 @@ class MainWindow(QMainWindow):
                         result = create_hole(doc, self.inventor_app, cmd)
                     elif op == "create_thread":
                         result = create_thread(doc, self.inventor_app, cmd)
+                    elif op == "create_revolve":
+                        result = create_revolve(doc, self.inventor_app, cmd)
+                    elif op in ADVANCED_PART_OPS:
+                        result = create_advanced_part(doc, self.inventor_app, cmd)
                     elif op in {"create_fillet", "create_chamfer"}:
                         result = create_edge_finish(doc, self.inventor_app, cmd)
                     else:
@@ -731,7 +961,11 @@ class MainWindow(QMainWindow):
             return
 
         # Single geometry operation path.
-        if targets and targets[0][1].get("op") in {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude", "create_hole", "create_thread", "create_fillet", "create_chamfer", "create_circular_pattern", "create_rectangular_pattern"}:
+        if targets and targets[0][1].get("op") in (
+            {"create_rectangle_extrude", "create_circle_extrude", "create_profile_extrude",
+             "create_hole", "create_thread", "create_fillet", "create_chamfer",
+             "create_circular_pattern", "create_rectangular_pattern", "create_revolve"} | ADVANCED_PART_OPS
+        ):
             comp, cmd = targets[0]
             path = comp.get("inventor_file")
             try:
@@ -758,6 +992,10 @@ class MainWindow(QMainWindow):
                 dims = f'Hole native: Ø{cmd["diameter"]} mm · {len(cmd["centers"])} vị trí · {cmd["extent"]} · mặt phẳng {cmd["plane"]} offset {cmd.get("offset_mm",0)} mm'
             elif cmd["op"] == "create_thread":
                 dims = f'Ren: {cmd["designation"]} · Face {cmd["face_index"]} · Edge {cmd["start_edge_index"]} · Hết ren: {cmd.get("full_depth", True)}'
+            elif cmd["op"] == "create_revolve":
+                dims = f'Revolve: {cmd.get("angle_deg", 360)}° · Trục: {cmd["axis_points"]} · Operation: {cmd.get("operation", "join")}'
+            elif cmd["op"] in ADVANCED_PART_OPS:
+                dims = f'Feature nâng cao: {cmd["op"]} · Tên Feature: {cmd.get("feature_name", "")}'
             elif cmd["op"] in {"create_fillet", "create_chamfer"}:
                 size_label = "Bán kính bo" if cmd["op"] == "create_fillet" else "Khoảng vát"
                 size_value = cmd.get("radius", cmd.get("distance"))
@@ -782,6 +1020,10 @@ class MainWindow(QMainWindow):
                     result = create_hole(doc, self.inventor_app, cmd)
                 elif cmd["op"] == "create_thread":
                     result = create_thread(doc, self.inventor_app, cmd)
+                elif cmd["op"] == "create_revolve":
+                    result = create_revolve(doc, self.inventor_app, cmd)
+                elif cmd["op"] in ADVANCED_PART_OPS:
+                    result = create_advanced_part(doc, self.inventor_app, cmd)
                 elif cmd["op"] in {"create_fillet", "create_chamfer"}:
                     result = create_edge_finish(doc, self.inventor_app, cmd)
                 else:
