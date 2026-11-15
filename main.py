@@ -656,10 +656,38 @@ class MainWindow(QMainWindow):
 
     def parse_commands(self):
         data = json.loads(self.command_text.toPlainText())
-        if data.get("project_id") != self.project.get("project_id"):
-            raise ValueError("project_id không khớp dự án đang mở.")
+        if not isinstance(data, dict):
+            raise ValueError("Gói JSON phải là một đối tượng có project_id và commands.")
         if not isinstance(data.get("commands", []), list):
             raise ValueError("'commands' phải là danh sách.")
+
+        active_project_id = str(self.project.get("project_id") or "").strip()
+        package_project_id = str(data.get("project_id") or "").strip()
+        if package_project_id != active_project_id:
+            answer = QMessageBox.question(
+                self,
+                "Xác nhận ID dự án",
+                "Gói JSON có project_id khác với dự án đang mở.\\n\\n"
+                f"ID trong JSON: {package_project_id or '(thiếu)'}\\n"
+                f"ID dự án hiện tại: {active_project_id or '(thiếu)'}\\n\\n"
+                "Bạn có muốn gắn gói JSON này vào dự án đang mở không?\\n"
+                "Ứng dụng vẫn sẽ kiểm tra từng component_id, file IPT/IAM, tham số và loại lệnh; "
+                "không có lệnh nào được chạy chỉ vì đổi ID.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                raise ValueError(
+                    "Đã dừng kiểm tra vì ID dự án không khớp. "
+                    "Hãy mở đúng dự án hoặc xác nhận gắn JSON vào dự án hiện tại."
+                )
+            if not active_project_id:
+                raise ValueError("Dự án hiện tại chưa có project_id hợp lệ.")
+            data["project_id"] = active_project_id
+            # Keep the corrected package visible so the next validation/apply
+            # action uses the same confirmed project ID without asking again.
+            self.command_text.setPlainText(json.dumps(data, ensure_ascii=False, indent=2))
+            self.pending_commands = data
         return data
 
     def validate_commands(self):
