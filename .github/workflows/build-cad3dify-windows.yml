@@ -1,0 +1,61 @@
+name: Build Cad3Dify Windows x64 EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build/cad3dify-windows-exe
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout builder branch
+        uses: actions/checkout@v4
+
+      - name: Checkout upstream Cad3Dify
+        uses: actions/checkout@v4
+        with:
+          repository: neka-nat/cad3dify
+          ref: main
+          path: upstream
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+
+      - name: Install upstream dependencies and packaging tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install .\upstream
+          python -m pip install "pymupdf>=1.24,<2" "pyinstaller>=6.11,<7"
+
+      - name: Check imports and CadQuery STEP export
+        shell: pwsh
+        run: |
+          python -m compileall -q .\upstream .\cad3dify-build
+          python -c "import cad3dify, streamlit, fitz, cadquery, OCP; print('Imports OK')"
+          python -c "import cadquery as cq; from cadquery import exporters; shape=cq.Workplane('XY').box(10,20,5); assert shape.val().isValid(); exporters.export(shape, 'cadquery_smoke_test.step'); print('CadQuery STEP export OK')"
+          if (!(Test-Path .\cadquery_smoke_test.step)) { throw "CadQuery did not create STEP smoke-test file." }
+
+      - name: Package desktop launcher
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name Cad3Dify --paths .\upstream --add-data ".\cad3dify-build\app.py;app" --add-data ".\upstream\LICENSE;." --collect-all streamlit --collect-all cad3dify --collect-all cadquery --collect-all OCP --collect-all langchain --collect-all langchain_core --collect-all langchain_openai --collect-all langchain_anthropic --collect-all langchain_google_genai --collect-all langchain_experimental --collect-all langchainhub --collect-all tiktoken --collect-all fitz --collect-all PIL --collect-all svglib --collect-all reportlab --collect-all rlpycairo --collect-all loguru --collect-all dotenv --collect-all pydantic --collect-all numpy .\cad3dify-build\launcher.py
+          if (!(Test-Path .\dist\Cad3Dify\Cad3Dify.exe)) { throw "PyInstaller EXE not found." }
+          Compress-Archive -Path .\dist\Cad3Dify\* -DestinationPath .\Cad3Dify_Windows_x64.zip -Force
+
+      - name: Upload Windows EXE package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cad3Dify_Windows_x64
+          path: Cad3Dify_Windows_x64.zip
+          if-no-files-found: error
+          retention-days: 30
