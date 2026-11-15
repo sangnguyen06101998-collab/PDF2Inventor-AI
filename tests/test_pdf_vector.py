@@ -22,7 +22,7 @@ class LocalPdfVectorTests(unittest.TestCase):
             report = analyze_pdf_vector(pdf_path)
             self.assertEqual(report["page_count"], 1)
             self.assertGreaterEqual(report["summary"]["total_vector_paths"], 2)
-            self.assertIn("150", report["pages"][0]["dimension_candidates"])
+            self.assertIn("150 mm", report["pages"][0]["dimension_candidates"])
             self.assertTrue(report["safety"]["automatic_3d_inference"] is False)
             self.assertIn("PHÂN TÍCH PDF CỤC BỘ", format_analysis_summary(report))
 
