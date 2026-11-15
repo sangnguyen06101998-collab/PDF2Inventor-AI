@@ -42,12 +42,22 @@ def open_browser_when_ready(url, port):
 
 def main():
     try:
+        runtime_dir = app_data_dir()
+        # Remove stale diagnostics from an earlier launch so the current
+        # startup result can be diagnosed accurately.
+        for filename in ("launcher_error.log", "server_port.txt"):
+            try:
+                (runtime_dir / filename).unlink(missing_ok=True)
+            except Exception:
+                pass
+
         root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         app_script = root / "app" / "app.py"
         if not app_script.is_file():
             raise FileNotFoundError(f"Không tìm thấy giao diện Cad3Dify: {app_script}")
 
         port = choose_port()
+        (runtime_dir / "server_port.txt").write_text(str(port), encoding="ascii")
         url = f"http://127.0.0.1:{port}"
         os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
         os.environ["STREAMLIT_SERVER_ADDRESS"] = "127.0.0.1"
@@ -65,6 +75,9 @@ def main():
             f"--server.port={port}",
             "--server.fileWatcherType=none",
             "--browser.gatherUsageStats=false",
+            # PyInstaller changes Streamlit's default development-mode
+            # detection. Explicitly disable it before server.port validation.
+            "--global.developmentMode", "false",
         ]
         stcli.main()
     except BaseException as exc:
@@ -79,7 +92,7 @@ def main():
             import ctypes
             ctypes.windll.user32.MessageBoxW(
                 0,
-                f"Cad3Dify gặp lỗi khởi động: {type(exc).__name__}: {exc}\n\n"
+                f"Cad3Dify gặp lỗi khởi động: {type(exc).__name__}: {exc}\\n\\n"
                 "Có thể xem launcher_error.log trong AppData\\Local\\Cad3Dify.",
                 "Cad3Dify - Startup Error",
                 0x10,
