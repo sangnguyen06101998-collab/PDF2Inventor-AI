@@ -1,0 +1,34 @@
+name: Build Inventor 2018 MCP for Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/mcp-inventor2018-v1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r mcp_inventor2018/requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build console MCP executable
+        working-directory: mcp_inventor2018
+        run: |
+          pyinstaller --noconfirm --clean --onefile --console --name Inventor2018MCP server.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Inventor2018MCP-Windows-x64
+          path: mcp_inventor2018/dist/Inventor2018MCP.exe
+          if-no-files-found: error
